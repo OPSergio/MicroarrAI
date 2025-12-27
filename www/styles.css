@@ -1,0 +1,269 @@
+/* ============================================================================
+ * MicroarrAI - Main Stylesheet
+ * ============================================================================
+ * Description: Custom CSS for the Shiny application
+ * Author: Sergio Olmos Piñero et al.
+ * ============================================================================
+ */
+
+/* Google Fonts Import */
+@import url('https://fonts.googleapis.com/css2?family=Sixtyfour&display=swap');
+
+/* ===== Global Styles ===== */
+body {
+  background-color: #191c32;
+  padding-bottom: 100px; /* Space for footer */
+}
+
+/* ===== Scroll Index & Sections ===== */
+.section {
+  min-height: 100vh;
+  font-family: 'Libre Baskerville', serif;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  padding: 20px;
+  text-align: center;
+  transition: background 1.5s ease;
+}
+
+.section.active {
+  opacity: 1;
+}
+
+.section article {
+  opacity: 0;
+  transform: translateY(100px); /* Appears from below for effect */
+  transition: opacity 1.5s ease-out, transform 1.5s ease-out;
+  width: 50%;
+  padding: 20px;
+}
+
+.section.active article {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ===== Layered Tiles Effect ===== */
+.tiles {
+  position: fixed;
+  left: 5%;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+
+.tile {
+  width: 220px;
+  height: 220px;
+  background: rgba(200, 200, 200, 0.1);
+  border-radius: 12px;
+  box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.5s ease, transform 0.5s ease;
+  position: absolute;
+  transform: rotateX(70deg) rotateZ(-40deg) translateZ(30px);
+  perspective: 1000px;
+}
+
+.tile::before {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background: inherit;
+  top: 5px;
+  left: 5px;
+  border-radius: 12px;
+  z-index: -1;
+  box-shadow: 0px 10px 20px rgba(0, 0, 0, 0.2);
+}
+
+.tile:nth-child(1) {
+  z-index: 4;
+  top: 0px;
+}
+
+.tile:nth-child(2) {
+  z-index: 3;
+  top: 20px;
+}
+
+.tile:nth-child(3) {
+  z-index: 2;
+  top: 40px;
+}
+
+.tile:nth-child(4) {
+  z-index: 1;
+  top: 60px;
+}
+
+/* Active tile colors with gradients */
+.active-tile-1 {
+  background: linear-gradient(135deg, #FFE0B2, #FFCC80);
+}
+
+.active-tile-2 {
+  background: linear-gradient(135deg, #FFCC80, #FFB74D);
+}
+
+.active-tile-3 {
+  background: linear-gradient(135deg, #FFB74D, #FF9800);
+}
+
+.active-tile-4 {
+  background: linear-gradient(135deg, #FF9800, #FB8C00);
+}
+
+.tile-gray {
+  background: rgba(200, 200, 200, 0.3);
+}
+
+/* ===== Navigation Tabs ===== */
+.nav-tabs {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #191c32;
+  border-bottom: 2px solid white;
+  padding-bottom: 5px;
+}
+
+.nav-item {
+  color: #ccc;
+}
+
+.nav-link {
+  color: #ccc;
+  font-size: 16px;
+  padding: 5px;
+  font-weight: bold;
+  text-align: center;
+  transition: all 0.3s ease-in-out;
+  border-radius: 10px;
+}
+
+.nav {
+  --bs-nav-link-padding-x: 1rem;
+  --bs-nav-link-padding-y: .5rem;
+  --bs-nav-link-font-weight: ;
+  --bs-nav-link-color: #ccc;
+  --bs-nav-link-hover-color: none;
+  --bs-nav-link-disabled-color: var(--bs-secondary-color);
+  display: flex;
+  display: -webkit-flex;
+  flex-wrap: wrap;
+  -webkit-flex-wrap: wrap;
+  padding-left: 0;
+  margin-bottom: 0;
+  list-style: none;
+  border-radius: 10px;
+}
+
+.nav-link:hover {
+  color: #18BC9C;
+  text-decoration: underline;
+}
+
+.nav-tabs .nav-link.active, 
+.nav-tabs > li > a.active {
+  color: #ffffff;
+  text-decoration: underline;
+  background-color: transparent;
+  font-weight: bold;
+  border: none;
+  border-bottom: 2px solid white;
+}
+
+/* ===== Header & Logo ===== */
+.title {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #191c32;
+  height: 180px;
+}
+
+.logo-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.logo_app {
+  width: 180px;
+  height: 180px;
+}
+
+/* ===== Loading Indicator ===== */
+#loading-time {
+  font-size: 20px;
+  font-weight: bold;
+  color: white;
+  margin-top: 10px;
+}
+
+/* ===== Typography ===== */
+h3 {
+  font-weight: bold;
+  background: -webkit-linear-gradient(white, gray); 
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 20px;
+  padding: 10px 0;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  text-align: center;
+  font-size: 2.5em;
+}
+
+h3 span {
+  font-family: 'Sixtyfour', sans-serif;
+}
+
+h6 {
+  font-style: italic;
+  text-align: center;
+}
+
+p, ul {
+  padding: 10px 20px;
+  font-size: 16px;
+  text-align: justify;
+}
+
+/* ===== Layout Utilities ===== */
+.column_row_i {
+  padding-left: 100px;
+  padding-top: 70px;
+}
+
+.column_row {
+  padding-left: 450px;
+}
+
+/* ===== Logo Images ===== */
+.irycis, .hospital, .logo {
+  width: 200px;
+  height: 100px;
+}
+
+/* ===== Log Text Styling ===== */
+.log-text {
+  font-family: 'Courier New', Courier, monospace;
+  color: #4CAF50;
+  font-weight: bold;
+}
+
+/* ===== Footer ===== */
+footer {
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  background-color: #191c32;
+  text-align: center;
+  color: white;
+  padding: 10px;
+  font-size: 14px;
+}
