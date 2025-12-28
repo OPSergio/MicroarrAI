@@ -15,6 +15,22 @@ body {
   padding-bottom: 100px; /* Space for footer */
 }
 
+/* Main content container - add breathing room */
+.container-fluid {
+  padding-left: 40px !important;
+  padding-right: 40px !important;
+}
+
+/* Tab content padding */
+.tab-content {
+  padding: 40px 30px;
+}
+
+/* Section spacing */
+.section {
+  margin-bottom: 40px;
+}
+
 /* ===== Scroll Index & Sections ===== */
 .section {
   min-height: 100vh;

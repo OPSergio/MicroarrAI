@@ -70,7 +70,22 @@ source("R/server/data_processing.R")
 
 # Statistical analysis (differential expression)
 source("R/server/statistical_analysis.R")
+
+# Regression models (GLM, multinomial)
+source("R/server/regression_models.R")
+
+# Machine learning - supervised models
+source("R/server/ml_supervised.R")
+
+# Machine learning - unsupervised models
+source("R/server/ml_unsupervised.R")
+
+# 3D visualization helpers
+source("R/server/visualization_3d.R")
+
+# Peptide summary statistics
 source("R/server/peptide_summary.R")
+
 # ===== Source UI Modules =====
 source("R/ui/ui_home.R")
 source("R/ui/ui_preprocess.R")

@@ -96,7 +96,7 @@ calculate_peptide_summary <- function(peptide_data, expression_threshold = 3) {
 
 #' Create Interactive Donut Chart for Isotype Distribution
 create_isotype_donut_chart <- function(isotype_summary, 
-                                       colors = c("#191c32", "#6A3D9A", "#00A087FF")) {
+                                       colors = c("#191c32", "#667eea", "#00A087FF")) {
   
   # Calculate percentages of positives
   isotype_summary <- isotype_summary %>%
@@ -225,9 +225,9 @@ create_expression_distribution_plot <- function(peptide_data) {
     data = expression_values,
     x = ~expression,
     color = ~Isotype,
-    colors = c("IgE" = "#191c32", "IgG4" = "#00A087FF", "Other" = "#4DBBD5FF"),
+    colors = c("IgE" = "#667eea", "IgG4" = "#00A087FF", "Other" = "#4DBBD5FF"),
     type = "histogram",
-    alpha = 0.6,
+    alpha = 0.8,
     nbinsx = 50
   ) %>%
     plotly::layout(

@@ -1,314 +1,637 @@
 # ============================================================================
-# MicroarrAI - Machine Learning UI Module
+# MicroarrAI - Machine Learning UI Module (REFACTORED)
 # ============================================================================
-# Description: UI for unsupervised and supervised machine learning analysis
-# Dependencies: ui_helpers.R
+# Description: Professional ML analysis configurator with launcher menu
+# Author: Enhanced by AI Assistant
 # ============================================================================
 
-#' Machine Learning Tab UI
+#' Machine Learning Tab UI - Complete Refactor
 #' 
-#' Complete ML interface with heatmap, unsupervised, and supervised methods
+#' Professional launcher-style interface with configuration menu
 #' 
 #' @return tabPanel for Machine Learning
 ui_ml <- function() {
   tabPanel(
     title = "Machine Learning",
     
-    # Target group selector (filled by server)
-    fluidRow(box(uiOutput("target_hgroup"))),
-    
-    # Annotated Heatmap
-    fluidRow(
-      column(12, 
-        section_title("Heatmap with annotations", size = "2.5em"),
-        card_container(
-          box(
-            width = 12, 
-            plotOutput("Combined_hplot", height = "500px")
-          )
-        )
-      )
-    ),
-    
-    # PCA target selector
-    fluidRow(box(uiOutput("target_PCA"))),
-    
-    # Nested tabs: Unsupervised vs Supervised
-    fluidRow(
-      tabsetPanel(
-        # ========== UNSUPERVISED TAB ==========
-        ui_ml_unsupervised(),
+    tabsetPanel(
+      id = "ml_subtabs",
+      
+      # ===== CONFIGURATION TAB =====
+      tabPanel(
+        title = "Configuration",
         
-        # ========== SUPERVISED TAB ==========
-        ui_ml_supervised()
-      )
-    )
-  )
-}
-
-
-#' Unsupervised Machine Learning Sub-Tab
-#' 
-#' PCA, PCoA, NMDS with 2D/3D visualizations
-#' 
-#' @return tabPanel for Unsupervised ML
-ui_ml_unsupervised <- function() {
-  tabPanel(
-    "Unsupervised Machine Learning",
-    
-    # ===== PCA Section =====
-    fluidRow(
-      column(12, 
-        section_title("Principal Component Analysis (PCA)"),
-        card_container(
-          fluidRow(
-            column(6, 
-              info_card(
-                "Description",
-                p("Principal Component Analysis (PCA) is a dimensionality reduction technique that transforms a set of correlated variables into a new set of uncorrelated variables, called principal components. In PCA, the first components capture most of the variability in the data.", 
-                  style = "color: #191c32;"),
-                p("This analysis is useful for reducing the complexity of large data sets, allowing easier visualisation and identification of important patterns. The 2D and 3D representations of the components are shown below.", 
-                  style = "color: #191c32;"),
-                shinycssloaders::withSpinner(plotOutput("PCA_2d", height = "400px", width = "100%"))
-              )
-            ),
-            column(6,
-              tags$div(
-                actionButton("toggle_surface_PCA", "Cambiar tipo de superficie"),
-                actionButton("toggle_ellipsoid_PCA", "Alternar elipsoide"),
-                br(),
-                verbatimTextOutput("current_params_PCA")
-              ),
-              tags$div(
-                shinycssloaders::withSpinner(rglwidgetOutput("d3_PCA", height = "600px", width = "600px"))
-              )
-            )
-          )
-        )
-      )
-    ),
-    
-    # ===== Distance Method Selector =====
-    fluidRow(
-      column(12,
-        selectInput("distance_method", 
-          label = dark_label("Choose the Distance Method:"),
-          choices = c("euclidean", "manhattan", "canberra", "bray"),
-          selected = "euclidean"
-        )
-      )
-    ),
-    
-    # ===== PCoA Section =====
-    fluidRow(
-      column(12, 
-        section_title("Principal Coordinates Analysis (PCoA)"),
-        card_container(
-          fluidRow(
-            column(6, 
-              info_card(
-                "Description",
-                p("Principal Coordinate Analysis (PCoA) is a dimensionality reduction technique based on a distance matrix. It is used to visualise the relationships between samples in a reduced space while maintaining the relative distances between them.", 
-                  style = "color: #191c32;"),
-                p("The 2D and 3D representations using selected distance methods are shown below.", 
-                  style = "color: #191c32;"),
-                shinycssloaders::withSpinner(plotOutput("PCoA_2d", height = "400px", width = "100%"))
-              )
-            ),
-            column(6,
-              tags$div(
-                actionButton("toggle_surface_PCOA", "Cambiar tipo de superficie"),
-                actionButton("toggle_ellipsoid_PCOA", "Alternar elipsoide"),
-                br(),
-                verbatimTextOutput("current_params_PCOA")
-              ),
-              tags$div(
-                shinycssloaders::withSpinner(rglwidgetOutput("PCoA_3d", height = "600px", width = "600px"))
-              )
-            )
-          )
-        )
-      )
-    ),
-    
-    # ===== NMDS Section =====
-    fluidRow(
-      column(12, 
-        section_title("Non-metric Multidimensional Scaling (NMDS)"),
-        card_container(
-          fluidRow(
-            column(6, 
-              info_card(
-                "Description",
-                p("Non-Metric Multidimensional Scaling (NMDS) is a non-linear dimensionality reduction technique based on the preservation of distance relationships between samples.", 
-                  style = "color: #191c32;"),
-                p("NMDS is commonly used to visualise complex relationships in data, such as those found in ecological or gene expression studies.", 
-                  style = "color: #191c32;"),
-                shinycssloaders::withSpinner(plotOutput("NMDS_2d", height = "400px", width = "100%"))
-              )
-            ),
-            column(6,
-              tags$div(
-                actionButton("toggle_surface_NMDS", "Cambiar tipo de superficie"),
-                actionButton("toggle_ellipsoid_NMDS", "Alternar elipsoide"),
-                br(),
-                verbatimTextOutput("current_params_NMDS")
-              ),
-              tags$div(
-                shinycssloaders::withSpinner(rglwidgetOutput("NMDS_3d", height = "600px", width = "600px"))
-              )
-            )
-          )
-        )
-      )
-    )
-  )
-}
-
-
-#' Supervised Machine Learning Sub-Tab
-#' 
-#' C5.0, Random Forest, SVM, XGBoost models with visualizations
-#' 
-#' @return tabPanel for Supervised ML
-ui_ml_supervised <- function() {
-  tabPanel(
-    "Supervised Machine Learning",
-    
-    # ===== C5.0 Model =====
-    fluidRow(section_title("Model C5.0")),
-    fluidRow(
-      card_container(
-        fluidRow(
-          column(4, 
-            info_card(
-              "Description",
-              p("The C5.0 algorithm is an improvement of the C4.5 algorithm. It is used for classification by generating a decision tree that divides the data into groups according to the feature offering the highest information gain. It is fast and efficient, handling large amounts of data and variables."),
-              p("In this model, we have used 100 trials and selected the 30 most important variables based on feature importance metrics.", 
-                style = "color: #191c32;")
-            )
-          ),
-          column(4, 
-            shinycssloaders::withSpinner(plotOutput("c5.plot", height = "300px", width = "300px"))
-          ),
-          column(4, 
-            shinycssloaders::withSpinner(plotOutput("c5.decision", height = "300px", width = "300px"))
-          )
-        )
-      )
-    ),
-    
-    # ===== Random Forest =====
-    fluidRow(section_title("Random Forest")),
-    fluidRow(
-      card_container(
-        fluidRow(
-          column(4,
-            info_card(
-              "Description",
-              p("Random Forest is a supervised learning algorithm based on multiple decision trees. Each tree is trained on a subset of the data, and the final prediction is obtained by taking the average (regression) or the majority vote (classification) of all the trees."),
-              p("This model is robust against overfitting and handles well data sets with many characteristics. In this case, we have selected the 30 most important variables to visualise.", 
-                style = "color: #191c32;")
-            )
-          ),
-          column(4, 
-            shinycssloaders::withSpinner(plotOutput("rf.plot", height = "400px", width = "400px"))
-          ),
-          column(4, 
-            shinycssloaders::withSpinner(plotOutput("rf.decision", height = "400px", width = "400px"))
-          )
-        )
-      )
-    ),
-    
-    # ===== SVM Model =====
-    fluidRow(section_title("Supported Vector Machine (SVM)")),
-    fluidRow(
-      card_container(
-        fluidRow(
-          column(4, 
-            shinycssloaders::withSpinner(plotlyOutput("svm3d.plot", height = "400px", width = "400px"))
-          ),
-          column(4, 
-            shinycssloaders::withSpinner(plotOutput("svm.plot", height = "400px", width = "400px"))
-          ),
-          column(4, 
-            info_card(
-              "Description",
-              p("SVM is a classification algorithm that seeks to find a hyperplane that optimally partitions the data. It maximises the margin between the closest data points of each class (support vectors). In this case, we use a linear kernel for classification."),
-              p("We use Recursive Feature Elimination (RFE) to select the most important variables that aid classification. The two most relevant variables are plotted in the graph below.", 
-                style = "color: #191c32;")
-            )
-          )
-        )
-      )
-    ),
-    
-    # ===== XGBoost Model =====
-    fluidRow(section_title("XGBoost Model")),
-    fluidRow(
-      card_container(
-        # Main row with description + 2 plots
-        fluidRow(
-          column(4, 
-            info_card(
-              "Description",
-              p("XGBoost (Extreme Gradient Boosting) is a tree-based supervised learning algorithm using boosting. It is extremely efficient for handling large volumes of data and detecting complex relationships between features. In this case, we have used 100 iterations to train the model."),
-              p("XGBoost focuses on minimising error through iterative model fitting and is robust against overfitting. We have selected the 30 most important variables based on their Gain information obtained during training.", 
-                style = "color: #191c32;")
-            )
-          ),
-          column(4, 
-            shinycssloaders::withSpinner(plotOutput("shap_importance_plot", height = "400px", width = "600px"))
-          ),
-          column(4, 
-            shinycssloaders::withSpinner(plotOutput("shap_importance_bee_plot", height = "400px", width = "600px"))
-          )
-        ),
-        
-        # Waterfall plot (centered, full width)
-        fluidRow(
-          column(12, 
-            card_container(
-              centered_content(
-                shinycssloaders::withSpinner(plotOutput("shap_waterfall_plot", height = "500px", width = "900px"))
-              )
-            )
-          )
-        ),
-        
-        # Force plot (centered, full width)
-        fluidRow(
-          column(12, 
-            card_container(
-              centered_content(
-                shinycssloaders::withSpinner(plotOutput("shap_force_plot", height = "400px", width = "900px"))
-              )
-            )
-          )
-        )
-      )
-    ),
-    
-    # ===== Variable Selection (Venn Diagram) =====
-    fluidRow(
-      column(5, 
         tags$div(
-          style = "padding: 20px; display: flex; justify-content: flex-start; align-items: center; height: 100%;",
-          h3("VARIABLE SELECTION PROCESS", 
-             style = "color: #FFFFFF; font-size: 2.5em; text-align: left;")
+          style = "margin-top: 20px;",
+          
+          # Main Title
+          section_title("MACHINE LEARNING PIPELINE CONFIGURATOR", size = "2.5em"),
+      
+          # Configuration Container
+          card_container_highlighted(
+            style = "margin: 0 15px; padding: 30px;",
+            
+            # Info Banner
+            tags$div(
+              style = "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 20px; margin-bottom: 30px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);",
+              tags$h4("Configure Your Analysis Pipeline", style = "color: white; margin: 0 0 10px 0; font-weight: 600;"),
+              tags$p(
+                style = "color: rgba(255,255,255,0.95); margin: 0; font-size: 14px; line-height: 1.6;",
+                "Select methods to apply to your biomarker data. Only peptides selected in the Peptide tab will be used for analysis."
+              )
+            ),
+            
+            # Target Variable Selection
+            fluidRow(
+              column(3,
+                tags$div(
+                  style = "background: white; border-radius: 8px; padding: 20px; margin-bottom: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);",
+                  tags$div(
+                    style = "display: flex; align-items: center; margin-bottom: 15px;",
+                    icon("bullseye", style = "font-size: 20px; color: #667eea; margin-right: 10px;"),
+                    tags$h5("Target Variable", style = "color: #191c32; margin: 0; font-weight: 600;")
+                  ),
+                  uiOutput("ml_target_selector"),
+                  tags$small(
+                    "Clinical variable for predictions or grouping.",
+                    style = "color: #666; font-size: 12px;"
+                  )
+                )
+              ),
+              column(9,
+                tags$div(
+                  style = "background: #e3f2fd; border-left: 4px solid #2196F3; padding: 15px; border-radius: 4px;",
+                  tags$div(
+                    style = "display: flex; align-items: center;",
+                    icon("info-circle", style = "color: #2196F3; margin-right: 8px; font-size: 16px;"),
+                    tags$strong("Biomarker Filtering", style = "color: #0d47a1; font-size: 14px;")
+                  ),
+                  tags$p(
+                    "This analysis will use ONLY the peptides you selected in the Peptide tab. If no selection has been made, all peptides will be used.",
+                    style = "color: #0d47a1; font-size: 13px; margin: 8px 0 0 0; line-height: 1.5;"
+                  )
+                )
+              )
+            ),
+            
+            # Method Selection Grid
+            fluidRow(
+          # Unsupervised Methods
+          column(6,
+            tags$div(
+              style = "background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); height: 100%;",
+              tags$div(
+                style = "display: flex; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 2px solid #667eea;",
+                icon("project-diagram", style = "font-size: 20px; color: #667eea; margin-right: 10px;"),
+                tags$h5("Unsupervised Learning", style = "color: #191c32; margin: 0; font-weight: 600;")
+              ),
+              tags$p(
+                "Explore data structure and identify natural groupings without labels.",
+                style = "color: #666; font-size: 13px; margin-bottom: 20px;"
+              ),
+              
+              # Heatmap
+              checkboxInput("ml_use_heatmap", 
+                tags$span(
+                  tags$strong("Hierarchical Clustering Heatmap"),
+                  tags$br(),
+                  tags$small("Visual clustering with dendrograms and annotations", style = "color: #666;")
+                ),
+                value = TRUE
+              ),
+              
+              # PCA
+              checkboxInput("ml_use_pca", 
+                tags$span(
+                  tags$strong("PCA (Principal Component Analysis)"),
+                  tags$br(),
+                  tags$small("Linear dimensionality reduction, variance-based", style = "color: #666;")
+                ),
+                value = TRUE
+              ),
+              
+              # PCoA
+              checkboxInput("ml_use_pcoa", 
+                tags$span(
+                  tags$strong("PCoA (Principal Coordinates Analysis)"),
+                  tags$br(),
+                  tags$small("Distance-based ordination for complex relationships", style = "color: #666;")
+                ),
+                value = TRUE
+              ),
+              
+              # NMDS
+              checkboxInput("ml_use_nmds", 
+                tags$span(
+                  tags$strong("NMDS (Non-metric Multidimensional Scaling)"),
+                  tags$br(),
+                  tags$small("Non-linear ordination preserving rank distances", style = "color: #666;")
+                ),
+                value = TRUE
+              ),
+              
+              # DBSCAN
+              checkboxInput("ml_use_dbscan", 
+                tags$span(
+                  tags$strong("DBSCAN (Density-Based Clustering)"),
+                  tags$br(),
+                  tags$small("Detects clusters of arbitrary shape and outliers", style = "color: #666;")
+                ),
+                value = FALSE
+              ),
+              
+              # PLS-DA
+              checkboxInput("ml_use_plsda", 
+                tags$span(
+                  tags$strong("PLS-DA (Partial Least Squares-Discriminant Analysis)"),
+                  tags$br(),
+                  tags$small("Supervised dimensionality reduction for classification", style = "color: #666;")
+                ),
+                value = FALSE
+              )
+            )
+          ),
+          
+          # Supervised Methods
+          column(6,
+            tags$div(
+              style = "background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); height: 100%;",
+              tags$div(
+                style = "display: flex; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 2px solid #667eea;",
+                icon("brain", style = "font-size: 20px; color: #667eea; margin-right: 10px;"),
+                tags$h5("Supervised Learning", style = "color: #191c32; margin: 0; font-weight: 600;")
+              ),
+              tags$p(
+                "Train predictive models using labeled data to classify samples.",
+                style = "color: #666; font-size: 13px; margin-bottom: 20px;"
+              ),
+              
+              # Tip Box
+              tags$div(
+                style = "background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin-bottom: 20px; border-radius: 4px;",
+                tags$div(
+                  style = "display: flex; align-items: center;",
+                  icon("lightbulb", style = "color: #ffc107; margin-right: 8px; font-size: 16px;"),
+                  tags$strong("Selection Strategy", style = "color: #856404; font-size: 13px;")
+                ),
+                tags$p(
+                  "The more models you select, the more restrictive the biomarker search becomes. Only features consistently important across all selected models will be identified as top biomarkers.",
+                  style = "color: #856404; font-size: 12px; margin: 8px 0 0 0; line-height: 1.5;"
+                )
+              ),
+              
+              # C5.0
+              checkboxInput("ml_use_c50", 
+                tags$span(
+                  tags$strong("C5.0 Decision Tree"),
+                  tags$br(),
+                  tags$small("Fast, interpretable tree-based classifier", style = "color: #666;")
+                ),
+                value = TRUE
+              ),
+              
+              # Random Forest
+              checkboxInput("ml_use_rf", 
+                tags$span(
+                  tags$strong("Random Forest"),
+                  tags$br(),
+                  tags$small("Ensemble of trees, robust to overfitting", style = "color: #666;")
+                ),
+                value = TRUE
+              ),
+              
+              # SVM
+              checkboxInput("ml_use_svm", 
+                tags$span(
+                  tags$strong("SVM (Support Vector Machine)"),
+                  tags$br(),
+                  tags$small("Maximum-margin classifier with RFE", style = "color: #666;")
+                ),
+                value = TRUE
+              ),
+              
+              # XGBoost
+              checkboxInput("ml_use_xgboost", 
+                tags$span(
+                  tags$strong("XGBoost (Extreme Gradient Boosting)"),
+                  tags$br(),
+                  tags$small("State-of-the-art gradient boosting with SHAP values", style = "color: #666;")
+                ),
+                value = TRUE
+              )
+            )
+          )
+        ),
+        
+        # Launch Button
+        fluidRow(
+          column(12,
+            tags$div(
+              style = "margin-top: 30px; text-align: center;",
+              actionButton(
+                "ml_run_pipeline",
+                tags$span(
+                  icon("play-circle", style = "margin-right: 8px;"),
+                  "Run ML Pipeline"
+                ),
+                class = "btn-primary",
+                style = "font-size: 18px; padding: 15px 40px; font-weight: 600; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);"
+              ),
+              tags$p(
+                "Click to start the analysis with your selected configuration",
+                style = "color: #666; font-size: 13px; margin-top: 10px;"
+              )
+            )
+          )
+        )
+      )
+    )
+  ),
+  
+  # ===== UNSUPERVISED RESULTS TAB =====
+  tabPanel(
+    title = "Unsupervised Learning",
+    
+    tags$div(
+      id = "ml_unsupervised_section",
+      style = "margin-top: 20px;",
+      
+      # Heatmap Section
+      tags$div(
+        id = "ml_heatmap_section",
+        style = "display: none;",
+        section_title("HIERARCHICAL CLUSTERING HEATMAP", size = "2.5em"),
+        card_container(
+          style = "margin: 0 15px; padding: 25px;",
+          shinycssloaders::withSpinner(
+            plotOutput("Combined_hplot", height = "600px")
+          )
+        ),
+        tags$hr(style = "margin: 40px 0;")
+      ),
+      
+      # Distance method selector
+      tags$div(
+        id = "ml_ordination_section",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            card_container(
+              style = "margin: 0 15px; padding: 20px;",
+              selectInput("distance_method", 
+                label = dark_label("Distance Method for Ordination:"),
+                choices = c("Euclidean" = "euclidean", 
+                           "Manhattan" = "manhattan", 
+                           "Canberra" = "canberra", 
+                           "Bray-Curtis" = "bray"),
+                selected = "euclidean",
+                width = "300px"
+              )
+            )
+          )
+        ),
+        tags$br()
+      ),
+      
+      # PCA Section
+      tags$div(
+        id = "ml_pca_results",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            section_title("Principal Component Analysis (PCA)", size = "2em"),
+            card_container(
+              style = "margin: 0 15px; padding: 25px;",
+              fluidRow(
+                column(6,
+                  tags$div(
+                    tags$h5("2D Projection", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    tags$p("PCA reduces dimensionality by projecting data onto principal components that capture maximum variance.", 
+                           style = "color: #666; font-size: 13px; margin-bottom: 15px;"),
+                    shinycssloaders::withSpinner(plotOutput("PCA_2d", height = "450px"))
+                  )
+                ),
+                column(6,
+                  tags$div(
+                    tags$h5("3D Interactive Visualization", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    actionButton("toggle_surface_PCA", "Toggle Surface Type", style = "margin-bottom: 10px;"),
+                    actionButton("toggle_ellipsoid_PCA", "Toggle Ellipsoid", style = "margin-bottom: 10px;"),
+                    br(),
+                    verbatimTextOutput("current_params_PCA"),
+                    shinycssloaders::withSpinner(rglwidgetOutput("d3_PCA", height = "500px"))
+                  )
+                )
+              )
+            )
+          )
         )
       ),
-      column(7, 
-        card_container(
-          fluidRow(
-            shinycssloaders::withSpinner(plotOutput("venn.plot", height = "400px", width = "500px"))
-          ),
-          fluidRow(
-            uiOutput("explanation")
+      
+      # PCoA Section
+      tags$div(
+        id = "ml_pcoa_results",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            section_title("Principal Coordinates Analysis (PCoA)", size = "2em"),
+            card_container(
+              style = "margin: 0 15px; padding: 25px;",
+              fluidRow(
+                column(6,
+                  tags$div(
+                    tags$h5("2D Ordination", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    tags$p("PCoA visualizes sample relationships based on a distance matrix, preserving inter-sample distances.", 
+                           style = "color: #666; font-size: 13px; margin-bottom: 15px;"),
+                    shinycssloaders::withSpinner(plotOutput("PCoA_2d", height = "450px"))
+                  )
+                ),
+                column(6,
+                  tags$div(
+                    tags$h5("3D Interactive Visualization", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    actionButton("toggle_surface_PCOA", "Toggle Surface Type", style = "margin-bottom: 10px;"),
+                    actionButton("toggle_ellipsoid_PCOA", "Toggle Ellipsoid", style = "margin-bottom: 10px;"),
+                    br(),
+                    verbatimTextOutput("current_params_PCOA"),
+                    shinycssloaders::withSpinner(rglwidgetOutput("PCoA_3d", height = "500px"))
+                  )
+                )
+              )
+            )
+          )
+        )
+      ),
+      
+      # NMDS Section
+      tags$div(
+        id = "ml_nmds_results",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            section_title("Non-metric Multidimensional Scaling (NMDS)", size = "2em"),
+            card_container(
+              style = "margin: 0 15px; padding: 25px;",
+              fluidRow(
+                column(6,
+                  tags$div(
+                    tags$h5("2D Ordination", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    tags$p("NMDS preserves rank-order distances between samples using a non-linear approach. Lower stress values indicate better fit.", 
+                           style = "color: #666; font-size: 13px; margin-bottom: 15px;"),
+                    shinycssloaders::withSpinner(plotOutput("NMDS_2d", height = "450px"))
+                  )
+                ),
+                column(6,
+                  tags$div(
+                    tags$h5("3D Interactive Visualization", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    actionButton("toggle_surface_NMDS", "Toggle Surface Type", style = "margin-bottom: 10px;"),
+                    actionButton("toggle_ellipsoid_NMDS", "Toggle Ellipsoid", style = "margin-bottom: 10px;"),
+                    br(),
+                    verbatimTextOutput("current_params_NMDS"),
+                    shinycssloaders::withSpinner(rglwidgetOutput("NMDS_3d", height = "500px"))
+                  )
+                )
+              )
+            )
+          )
+        )
+      ),
+      
+      # DBSCAN Section
+      tags$div(
+        id = "ml_dbscan_results",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            section_title("DBSCAN Clustering", size = "2em"),
+            card_container(
+              style = "margin: 0 15px; padding: 25px;",
+              fluidRow(
+                column(6,
+                  tags$div(
+                    tags$h5("Cluster Visualization", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    tags$p("DBSCAN identifies dense regions as clusters and marks sparse points as outliers (noise).", 
+                           style = "color: #666; font-size: 13px; margin-bottom: 15px;"),
+                    shinycssloaders::withSpinner(plotOutput("dbscan_plot", height = "450px"))
+                  )
+                ),
+                column(6,
+                  tags$div(
+                    tags$h5("Performance Metrics", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    uiOutput("dbscan_metrics")
+                  )
+                )
+              )
+            )
+          )
+        )
+      ),
+      
+      # PLS-DA Section
+      tags$div(
+        id = "ml_plsda_results",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            section_title("PLS-DA Analysis", size = "2em"),
+            card_container(
+              style = "margin: 0 15px; padding: 25px;",
+              fluidRow(
+                column(6,
+                  tags$div(
+                    tags$h5("Score Plot", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    tags$p("PLS-DA maximizes separation between groups by finding latent variables that best discriminate classes.", 
+                           style = "color: #666; font-size: 13px; margin-bottom: 15px;"),
+                    shinycssloaders::withSpinner(plotOutput("plsda_score_plot", height = "450px"))
+                  )
+                ),
+                column(6,
+                  tags$div(
+                    tags$h5("Model Performance", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    uiOutput("plsda_metrics"),
+                    tags$hr(),
+                    tags$h5("Variable Importance (VIP)", style = "color: #191c32; margin-top: 20px; margin-bottom: 15px; font-weight: 600;"),
+                    shinycssloaders::withSpinner(plotOutput("plsda_vip_plot", height = "300px"))
+                  )
+                )
+              )
+            )
           )
         )
       )
     )
-  )
-}
+  ),
+  
+  # ===== SUPERVISED RESULTS TAB =====
+  tabPanel(
+    title = "Supervised Learning",
+    
+    tags$div(
+      id = "ml_supervised_section",
+      style = "margin-top: 20px;",
+      
+      # C5.0 Section
+      tags$div(
+        id = "ml_c50_results",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            section_title("C5.0 Decision Tree", size = "2em"),
+            card_container(
+              style = "margin: 0 15px; padding: 25px;",
+              fluidRow(
+                column(4,
+                  tags$div(
+                    tags$h5("Model Description", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    tags$p("C5.0 creates interpretable decision trees using information gain. Trained with 100 trials on the 30 most important features.", 
+                           style = "color: #666; font-size: 13px; line-height: 1.6;")
+                  )
+                ),
+                column(4,
+                  shinycssloaders::withSpinner(plotOutput("c5.plot", height = "350px"))
+                ),
+                column(4,
+                  shinycssloaders::withSpinner(plotOutput("c5.decision", height = "350px"))
+                )
+              )
+            )
+          )
+        )
+      ),
+      
+      # Random Forest Section
+      tags$div(
+        id = "ml_rf_results",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            section_title("Random Forest Classifier", size = "2em"),
+            card_container(
+              style = "margin: 0 15px; padding: 25px;",
+              fluidRow(
+                column(4,
+                  tags$div(
+                    tags$h5("Model Description", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    tags$p("Ensemble of decision trees trained on bootstrap samples. Robust against overfitting and handles high-dimensional data well.", 
+                           style = "color: #666; font-size: 13px; line-height: 1.6;")
+                  )
+                ),
+                column(4,
+                  shinycssloaders::withSpinner(plotOutput("rf.plot", height = "400px"))
+                ),
+                column(4,
+                  shinycssloaders::withSpinner(plotOutput("rf.decision", height = "400px"))
+                )
+              )
+            )
+          )
+        )
+      ),
+      
+      # SVM Section
+      tags$div(
+        id = "ml_svm_results",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            section_title("Support Vector Machine (SVM)", size = "2em"),
+            card_container(
+              style = "margin: 0 15px; padding: 25px;",
+              fluidRow(
+                column(4,
+                  shinycssloaders::withSpinner(plotlyOutput("svm3d.plot", height = "400px"))
+                ),
+                column(4,
+                  shinycssloaders::withSpinner(plotOutput("svm.plot", height = "400px"))
+                ),
+                column(4,
+                  tags$div(
+                    tags$h5("Model Description", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    tags$p("SVM finds the optimal hyperplane that maximizes the margin between classes. Features selected using Recursive Feature Elimination (RFE).", 
+                           style = "color: #666; font-size: 13px; line-height: 1.6;")
+                  )
+                )
+              )
+            )
+          )
+        )
+      ),
+      
+      # XGBoost Section
+      tags$div(
+        id = "ml_xgboost_results",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            section_title("XGBoost Classifier", size = "2em"),
+            card_container(
+              style = "margin: 0 15px; padding: 25px;",
+              fluidRow(
+                column(4,
+                  tags$div(
+                    tags$h5("Model Description", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    tags$p("Extreme Gradient Boosting with 100 iterations. Highly efficient for large datasets with complex feature interactions. SHAP values provide interpretability.", 
+                           style = "color: #666; font-size: 13px; line-height: 1.6;")
+                  )
+                ),
+                column(4,
+                  shinycssloaders::withSpinner(plotOutput("shap_importance_plot", height = "400px"))
+                ),
+                column(4,
+                  shinycssloaders::withSpinner(plotOutput("shap_importance_bee_plot", height = "400px"))
+                )
+              ),
+              tags$hr(style = "margin: 30px 0;"),
+              fluidRow(
+                column(12,
+                  tags$h5("SHAP Waterfall Explanation", style = "color: #191c32; margin-bottom: 15px; font-weight: 600; text-align: center;"),
+                  shinycssloaders::withSpinner(plotOutput("shap_waterfall_plot", height = "500px"))
+                )
+              ),
+              tags$hr(style = "margin: 30px 0;"),
+              fluidRow(
+                column(12,
+                  tags$h5("SHAP Force Plot", style = "color: #191c32; margin-bottom: 15px; font-weight: 600; text-align: center;"),
+                  shinycssloaders::withSpinner(plotOutput("shap_force_plot", height = "400px"))
+                )
+              )
+            )
+          )
+        )
+      ),
+      
+      # Variable Selection (Venn Diagram)
+      tags$div(
+        id = "ml_venn_results",
+        style = "display: none;",
+        fluidRow(
+          column(12,
+            section_title("BIOMARKER SELECTION CONSENSUS", size = "2em"),
+            card_container(
+              style = "margin: 0 15px; padding: 25px;",
+              fluidRow(
+                column(6,
+                  tags$div(
+                    style = "padding: 20px;",
+                    tags$h4("Variable Selection Process", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                    tags$p("The Venn diagram shows the overlap of important features identified by each model. Features selected by multiple models are considered more robust biomarkers.", 
+                           style = "color: #666; font-size: 14px; line-height: 1.6;")
+                  )
+                ),
+                column(6,
+                  shinycssloaders::withSpinner(plotOutput("venn.plot", height = "450px"))
+                )
+              ),
+              tags$hr(style = "margin: 30px 0;"),
+              fluidRow(
+                column(12,
+                  uiOutput("explanation")
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )  # Close tabPanel Supervised Learning
+)    # Close tabsetPanel
+)    # Close tabPanel Machine Learning
+}    # Close ui_ml function

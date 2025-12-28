@@ -32,7 +32,7 @@ ui_peptide <- function() {
       section_title("DATA OVERVIEW", size = "2.5em")
     ),
     
-    # KPI Boxes - flotando sin background container
+    # KPI Boxes 
     tags$div(
       style = "padding: 20px 15px 10px 15px; margin: 0;",
       fluidRow(
@@ -91,14 +91,34 @@ ui_peptide <- function() {
     loading_overlay(id = "loader", gif_src = "assets/Carga.gif"),
     
     # ===== 3. SELECTION OF CANDIDATE PEPTIDES =====
-    section_title("SELECTION OF CANDIDATE PEPTIDES", size = "2.5em"),
+    tags$div(
+      style = "margin-top: 60px;",
+      section_title("SELECTION OF CANDIDATE PEPTIDES", size = "2.5em")
+    ),
     
     card_container_highlighted(
       style = "margin: 0 15px; padding: 25px;",
       fluidRow(
         column(
           12,
-          p("Linear Models (LM) are used as the primary method for differential expression analysis. You can optionally add contrast tests (ANOVA/t-test or Kruskal-Wallis/Wilcoxon) for comparison.",
+          tags$div(
+            style = "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; padding: 20px; margin-bottom: 25px; color: white;",
+            tags$h4("What are Differentially Expressed Genes (DEGs)?", style = "margin-top: 0; font-weight: bold; color: white;"),
+            tags$p(
+              "Differentially Expressed Genes (DEGs) are features showing significant changes in expression levels between experimental conditions. In biomarker discovery, identifying DEGs is crucial as they represent potential diagnostic or therapeutic targets.",
+              style = "margin-bottom: 10px; line-height: 1.6;"
+            ),
+            tags$p(
+              tags$strong("Selection Criteria:"), " For robust biomarker selection, combine biological criteria (down/over-expression patterns), statistical significance (p-values, adjusted p-values), and discriminatory power (Fold Change, AUC, Accuracy). This multifaceted approach ensures that selected candidates are both statistically significant and biologically relevant.",
+              style = "margin-bottom: 0; line-height: 1.6;"
+            )
+          )
+        )
+      ),
+      fluidRow(
+        column(
+          12,
+          p("Linear Models (LM) are used as the primary method for differential expression analysis.",
             style = "color: #191c32; text-align: justify; margin-bottom: 20px;")
         )
       ),
@@ -114,124 +134,228 @@ ui_peptide <- function() {
         ),
         column(3, uiOutput("stats_var")),
         column(
-          3,
-          checkboxInput(
-            inputId = "add_contrast_test",
-            label = "Add contrast test",
-            value = FALSE
-          ),
-          conditionalPanel(
-            condition = "input.add_contrast_test == true",
-            radioButtons(
-              inputId = "contrast_method",
-              label = dark_label("Contrast Test:"),
-              choices = c("ANOVA/t-test" = "anova",
-                         "Kruskal-Wallis/Wilcoxon" = "kruskal"),
-              selected = "anova"
-            )
-          )
-        ),
-        column(
-          3,
+          6,
           centered_content(
             height = "80%",
             actionButton(
               inputId = "run_analysis_1",
               label = "Run Analysis",
               class = "btn-primary",
-              style = "width: 100%; margin-top: 25px;"
+              style = "width: 50%; margin-top: 25px;"
             )
           )
         )
       )
     ),
     
-    # ===== 4. DEG (DIFFERENTIAL EXPRESSION) =====
-    tags$div(
-      id = "stats_div",
-      style = "display: none;",
-      section_title("DIFFERENTIAL EXPRESSION GENES (DEG)", size = "2.5em"),
-      card_container_highlighted(
-        style = "margin: 0 15px; padding: 25px;",
-        fluidRow(
-          column(
-            4,
-            sliderInput(
-              inputId = "pval_threshold",
-              label = dark_label("Adjusted p-value threshold:"),
-              min = 0, max = 0.1, value = 0.05, step = 0.01
-            ),
-            withSpinner(DT::dataTableOutput("stats_table"))
-          ),
-          column(
-            8,
-            uiOutput("stats_var_plot"),
-            withSpinner(plotly::plotlyOutput("stats_plot"))
-          )
-        )
-      )
-    ),
     
-    # ===== 5. FEATURE LEVEL (ROC & REGRESSION) =====
-    tags$div(
-      id = "feature_level_div",
-      style = "display: none;",
-      section_title("FEATURE LEVEL ANALYSIS", size = "2.5em"),
-      card_container_highlighted(
-        style = "margin: 0 15px; padding: 25px;",
-        fluidRow(
-          column(6, withSpinner(DT::dataTableOutput("reg_table")), align = "center"),
-          column(6, withSpinner(plotOutput("rocs_plot")))
-        )
-      )
-    ),
-    
-    # ===== VOLCANO PLOT =====
+    # ===== VOLCANO PLOT | DIFFERENTIAL EXPRESSION =====
     tags$div(
       id = "volcano_div",
-      section_title("VOLCANO PLOT", size = "2.5em"),
-      style = "display: none;",
+      style = "display: none; margin-top: 60px;",
+      section_title("DIFFERENTIAL EXPRESSION ANALYSIS", size = "2.5em"),
       card_container_highlighted(
         style = "margin: 0 15px; padding: 25px;",
+        fluidRow(
+          column(
+            12,
+            tags$div(
+              style = "background: #f8f9fa; border-left: 4px solid #667eea; padding: 15px; margin-bottom: 20px; border-radius: 4px;",
+              tags$p(
+                tags$strong("About Volcano Plots:"), " Volcano plots visualize the relationship between statistical significance (p-value) and biological significance (fold change). Points in the upper corners represent highly significant and biologically relevant changes.",
+                style = "margin: 0; color: #191c32;"
+              )
+            )
+          )
+        ),
         fluidRow(
           column(
             3,
-            h4("Volcano (DE)", style = "color: #191c32; margin-bottom: 15px;"),
+            h4("Filter Options", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
+            
             checkboxGroupInput(
-              "volcano_isotypes", "Isotypes",
+              "volcano_isotypes", 
+              dark_label("Select Isotypes:"),
               choices = c("IgE", "IgG4"),
               selected = c("IgE", "IgG4")
             ),
-            checkboxInput("volcano_facet_isotype", "Facet por isotipo", value = TRUE),
+            
+            checkboxInput(
+              "volcano_facet_isotype", 
+              "Separate plots by isotype", 
+              value = TRUE
+            ),
+            
             uiOutput("volcano_group_var_ui"),
             uiOutput("volcano_level_a_ui"),
             uiOutput("volcano_level_b_ui"),
-            sliderInput("volcano_lfc_thr", "Umbral |log2FC|", min = 0, max = 3, value = 1, step = 0.1),
-            sliderInput("volcano_padj_thr", "Umbral FDR (BH)", min = 0, max = 0.2, value = 0.05, step = 0.005),
-            checkboxInput("volcano_interactive", "Gráfico interactivo (plotly)", value = TRUE),
-            downloadButton("download_volcano_tbl", "Descargar resultados (.csv)")
+            
+            tags$div(
+              style = "margin-top: 15px;",
+              sliderInput(
+                "volcano_lfc_thr", 
+                dark_label("Fold Change Threshold (|log2FC|):"),
+                min = 0, max = 3, value = 1, step = 0.1
+              ),
+              tags$small("Minimum absolute log2 fold change to consider a feature significant", style = "color: #666;")
+            ),
+            
+            tags$div(
+              style = "margin-top: 15px;",
+              sliderInput(
+                "volcano_padj_thr", 
+                dark_label("FDR Threshold (Benjamini-Hochberg):"),
+                min = 0, max = 0.2, value = 0.05, step = 0.005
+              ),
+              tags$small("False Discovery Rate threshold for multiple testing correction", style = "color: #666;")
+            ),
+            
+            checkboxInput(
+              "volcano_interactive", 
+              "Interactive plot (plotly)", 
+              value = TRUE
+            ),
+            
+            tags$hr(),
+            
+            downloadButton(
+              "download_volcano_tbl", 
+              "Download Results (.csv)",
+              class = "btn-primary",
+              style = "width: 100%;"
+            )
           ),
           column(
             9,
             uiOutput("volcano_plot_container"),
             br(),
+            tags$h4("Significant Features", style = "color: #191c32; margin: 20px 0 15px 0; font-weight: bold;"),
             DT::DTOutput("volcano_hits_table")
           )
         )
       )
     ),
     
-    # ===== 6. RESULTS OF THE ANALYSIS =====
+    # ===== 5. DIFFERENTIAL EXPRESSION | FEATURE ANALYSIS =====
+    tags$div(
+      id = "stats_div",
+      style = "display: none; margin-top: 60px;",
+      section_title("FEATURE LEVEL", size = "2.5em"),
+      card_container_highlighted(
+        style = "margin: 0 15px; padding: 25px;",
+        fluidRow(
+          column(
+            6,
+            tags$h4("Differential Expression Results", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
+            withSpinner(DT::dataTableOutput("unified_stats_table"))
+          ),
+          column(
+            6,
+            tags$div(
+              uiOutput("stats_var_plot"),
+              withSpinner(plotly::plotlyOutput("stats_plot", height = "350px"))
+            ),
+            tags$hr(style = "margin: 20px 0;"),
+            tags$div(
+              tags$h4("ROC Curve", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
+              withSpinner(plotOutput("rocs_plot", height = "350px"))
+            )
+          )
+        )
+      )
+    ),
+    
+    # ===== 6. ANALYSIS FILTERS =====
+    tags$div(
+      id = "results_filters_div",
+      style = "display: none; margin-top: 60px;",
+      section_title("ANALYSIS FILTERS", size = "2.5em"),
+      card_container_highlighted(
+        style = "margin: 0 15px; padding: 30px;",
+        tags$div(
+          style = "max-width: 1200px; margin: 0 auto;",
+          tags$div(
+            style = "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 20px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);",
+            tags$div(
+              style = "display: flex; align-items: center; margin-bottom: 10px;",
+              icon("filter", style = "font-size: 22px; color: white; margin-right: 12px;"),
+              tags$h4("Filter Criteria for Results", style = "color: white; margin: 0; font-weight: 600;")
+            ),
+            tags$p(
+              style = "color: rgba(255,255,255,0.9); margin: 0; font-size: 14px; line-height: 1.6;",
+              "Adjust the thresholds below to refine the peptides included in the analysis results. Only peptides meeting both criteria will be displayed."
+            )
+          ),
+          fluidRow(
+            column(
+              6,
+              tags$div(
+                style = "background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);",
+                tags$div(
+                  style = "display: flex; align-items: center; margin-bottom: 15px;",
+                  icon("chart-line", style = "font-size: 18px; color: #667eea; margin-right: 10px;"),
+                  tags$h5("Statistical Significance", style = "color: #191c32; margin: 0; font-weight: 600;")
+                ),
+                sliderInput(
+                  inputId = "results_pval_threshold",
+                  label = dark_label("Adjusted p-value threshold:"),
+                  min = 0, max = 0.1, value = 0.05, step = 0.01,
+                  width = "100%"
+                ),
+                tags$small(
+                  "Only peptides with FDR-corrected p-value below this threshold are included.",
+                  style = "color: #666; font-size: 12px;"
+                )
+              )
+            ),
+            column(
+              6,
+              tags$div(
+                style = "background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);",
+                tags$div(
+                  style = "display: flex; align-items: center; margin-bottom: 15px;",
+                  icon("bullseye", style = "font-size: 18px; color: #667eea; margin-right: 10px;"),
+                  tags$h5("Predictive Performance", style = "color: #191c32; margin: 0; font-weight: 600;")
+                ),
+                sliderInput(
+                  inputId = "results_auc_threshold",
+                  label = dark_label("Minimum AUC threshold:"),
+                  min = 0.5, max = 1, value = 0.65, step = 0.05,
+                  width = "100%"
+                ),
+                tags$small(
+                  "Only peptides with Area Under the Curve (AUC) above this value are included.",
+                  style = "color: #666; font-size: 12px;"
+                )
+              )
+            )
+          )
+        )
+      )
+    ),
+    
+    # ===== 7. RESULTS OF THE ANALYSIS =====
     tags$div(
       id = "results_summary_div",
-      style = "display: none;",
+      style = "display: none; margin-top: 40px;",
       section_title("RESULTS OF THE ANALYSIS", size = "2.5em"),
-      card_container(
-        style = "padding: 25px; margin: 0 15px; background: transparent;",
+      
+      # KPIs outside main container
+      tags$div(
+        style = "padding: 20px 15px; margin: 0; background: transparent;",
         fluidRow(
-          column(12, uiOutput("results_kpi_boxes"))
-        ),
-        tags$hr(style = "margin: 20px 0; border-color: rgba(255,255,255,0.1);"),
+          column(12, 
+            tags$div(
+              style = "justify-content: center;",
+              uiOutput("results_kpi_boxes")
+            )
+          )
+        )
+      ),
+      
+      # Main content container
+      card_container(
+        style = "padding: 25px; margin: 0 15px;",
         fluidRow(
           column(
             6,
@@ -240,53 +364,68 @@ ui_peptide <- function() {
           ),
           column(
             6,
-            tags$h4("Analysis Summary", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
-            uiOutput("results_summary_text")
+            tags$div(
+              style = "background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);",
+              tags$h4("Analysis Summary", style = "color: #191c32; margin-top: 0; margin-bottom: 15px; font-weight: bold;"),
+              uiOutput("results_summary_text")
+            )
           )
         )
       )
     ),
     
-    # ===== 7. BIOMARKER SELECTION FOR ML =====
+    # ===== 8. BIOMARKER SELECTION FOR ML =====
     tags$div(
       id = "funnel_div",
-      style = "display: none;",
+      style = "display: none; margin-top: 60px;",
       section_title("BIOMARKER SELECTION FOR MACHINE LEARNING", size = "2.5em"),
       card_container_highlighted(
         style = "margin: 0 15px; padding: 25px;",
         fluidRow(
           column(
-            4,
+            12,
+            tags$div(
+              style = "background: #f8f9fa; border-left: 4px solid #667eea; padding: 20px; margin-bottom: 25px; border-radius: 4px;",
+              tags$h4("Biomarker Selection Methods", style = "margin-top: 0; color: #191c32; font-weight: bold;"),
+              tags$p(
+                tags$strong("Top N:"), " Selects the N best peptides ranked by a combined score of p-value and AUC. This method ensures you get the most statistically significant and discriminatory biomarkers.",
+                style = "margin-bottom: 10px; color: #191c32;"
+              ),
+              tags$p(
+                tags$strong("AUC Threshold:"), " Selects all peptides with an Area Under the Curve (AUC) above the specified threshold. AUC measures the classifier's ability to distinguish between classes, where 0.5 = random and 1.0 = perfect classification.",
+                style = "margin-bottom: 0; color: #191c32;"
+              )
+            )
+          )
+        ),
+        fluidRow(
+          column(
+            6,
             tags$h4("Selection Method", style = "color: #191c32; margin-bottom: 20px; font-weight: bold;"),
             radioButtons(
               "ml_selection_method", 
-              "Select peptides by:",
+              dark_label("Select peptides by:"),
               choices = c("Top N (best p-value & AUC)" = "top_n", "AUC Threshold" = "auc_threshold"),
               selected = "top_n"
             ),
             conditionalPanel(
               condition = "input.ml_selection_method == 'top_n'",
-              numericInput("ml_top_n", "Number of peptides:", value = 20, min = 1, max = 100, step = 1)
+              numericInput("ml_top_n", dark_label("Number of peptides:"), value = 20, min = 1, max = 100, step = 1)
             ),
             conditionalPanel(
               condition = "input.ml_selection_method == 'auc_threshold'",
-              sliderInput("ml_auc_threshold", "Minimum AUC:", min = 0.5, max = 1, value = 0.7, step = 0.05)
+              sliderInput("ml_auc_threshold", dark_label("Minimum AUC:"), min = 0.5, max = 1, value = 0.7, step = 0.05)
             ),
-            tags$hr(style = "margin: 20px 0;"),
+            tags$hr(style = "margin: 30px 0 20px 0;"),
             actionButton("ml_select_peptides", "Apply Selection", class = "btn-info", style = "width: 100%; margin-bottom: 10px;"),
             actionButton("ml_send_to_tab", "Send to Machine Learning →", class = "btn-primary", style = "width: 100%;")
           ),
           column(
-            8,
-            tags$h4("Selected Biomarkers", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
-            selectizeInput(
-              "ml_selected_peptides",
-              label = NULL,
-              choices = NULL, 
-              multiple = TRUE,
-              options = list(placeholder = "No peptides selected yet")
-            ),
-            DT::DTOutput("ml_selection_table")
+            6,
+            tags$div(
+              style = "background: white; border-radius: 8px; padding: 20px; min-height: 300px; display: flex; align-items: center; justify-content: center;",
+              uiOutput("ml_selection_summary")
+            )
           )
         )
       )

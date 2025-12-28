@@ -57,13 +57,6 @@ ui <- fluidPage(
     ui_2d_visualization(),
     ui_3d_visualization()
   
-  ),
-  tags$footer(
-    tags$div(
-      "© 2024 Peptide MicroarrAI | solmos97@gmail.com",
-      style = "color: white; background-color: #191c32; text-align: center; padding: 10px; font-size: 14px;"
-    ),
-    style = "position: fixed; bottom: 0; width: 100%; margin-top: 2em;"
   )# Cierre del body
 ) # Cierre del UI
 
@@ -362,7 +355,7 @@ server <- function(input, output, session){
     # Icons for each KPI
     kpi_icons <- c("users", "dna", "chart-line", "chart-area", "plus-circle", "arrows-alt-h")
     
-    # KPI cards in horizontal row - clean white design
+    # KPI cards
     fluidRow(
         lapply(1:nrow(kpi_data), function(i) {
           column(
@@ -386,19 +379,15 @@ server <- function(input, output, session){
               ),
               # Content
               div(
-                style = "position: relative; z-index: 1;",
+                style = "position: relative; z-index: 2;",
                 tags$div(
-                  style = "display: flex; align-items: center; margin-bottom: 8px;",
-                  tags$i(class = paste0("fa fa-", kpi_icons[i]), 
-                         style = "color: #191c32; font-size: 18px; margin-right: 10px;")
+                  style = "align-items: center; margin-bottom: 10px;",
+                  icon(kpi_icons[i], style = "font-size: 18px; color: #191c32; margin-right: 8px;"),
+                  tags$span(kpi_data$Metric[i], style = "font-size: 14px; color: #191c32; font-weight: 600;")
                 ),
-                tags$h3(
-                  kpi_data$Value[i], 
-                  style = "color: #191c32; margin: 0 0 8px 0; font-weight: bold; font-size: 1.8em;"
-                ),
-                tags$p(
-                  kpi_data$Metric[i], 
-                  style = "color: #191c32; margin: 0; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7;"
+                tags$div(
+                  style = "font-size: 32px; font-weight: bold; color: #191c32; margin: 5px 0;",
+                  kpi_data$Value[i]
                 )
               )
             )
@@ -446,7 +435,7 @@ server <- function(input, output, session){
     ) %>%
       DT::formatStyle(
         'Positive Peptides',
-        background = DT::styleColorBar(range(table_data$`Positive Peptides`), '#191c32'),
+        background = DT::styleColorBar(range(table_data$`Positive Peptides`), '#667eea'),
         backgroundSize = '100% 90%',
         backgroundRepeat = 'no-repeat',
         backgroundPosition = 'center'
@@ -475,24 +464,6 @@ server <- function(input, output, session){
       rownames = FALSE
     )
   })
-  
-  
-  # DEPRECATED: Replaced by global summary panel
-  # output$desc_table_pep <- DT::renderDataTable({
-  #   skimmed_data <- skimr::skim(pepdata() %>% 
-  #                                 dplyr::select_if(is.numeric))
-  # 
-  #   numeric_cols <- sapply(skimmed_data, is.numeric)
-  # 
-  #   skimmed_data[, numeric_cols] <- round(skimmed_data[, numeric_cols], 2)
-  #   
-  #   DT::datatable(skimmed_data,
-  #                 options = list(
-  #                   scrollY = "250px",
-  #                   pageLength = 5,
-  #                   lengthMenu = c(5, 10, 15, 20)
-  #                 ))
-  # })
   
   
   output$stats_var <- renderUI({
@@ -526,6 +497,7 @@ server <- function(input, output, session){
       shinyjs::show("stats_div")
       shinyjs::show("feature_level_div")
       shinyjs::show("volcano_div")
+      shinyjs::show("results_filters_div")
       shinyjs::show("results_summary_div")
       shinyjs::show("funnel_div")
       
@@ -536,9 +508,7 @@ server <- function(input, output, session){
     }
   })
   
-  
-  ##################### Comparacion entre grupos ##################
-  
+
   tests <- eventReactive(input$run_analysis_1, {
     req(input$analysis_type == "Comparison between groups (Classification)")  
     req(pepdata(), database())
@@ -573,26 +543,32 @@ server <- function(input, output, session){
   
   tests_filtered <- reactive({
     req(tests())
-    filter_biomarkers(
+    req(input$results_pval_threshold)
+    
+    filtered <- filter_biomarkers(
       stats_results = tests(),
       pval_raw_threshold = 0.05,
-      pval_adj_threshold = input$pval_threshold
+      pval_adj_threshold = input$results_pval_threshold
     )
+    
+    # Ensure consistent column names: rename p.value -> p
+    if ("p.value" %in% names(filtered) && !"p" %in% names(filtered)) {
+      filtered <- filtered %>% rename(p = p.value)
+    }
+    
+    # Note: log2FC and status are contrast-specific (calculated in volcano plot)
+    # They don't belong to the peptide itself, only to a 2-group comparison
+    
+    return(filtered)
   })
   
   
   output$stats_table <- DT::renderDataTable({
     req(tests_filtered())
     
-    # Debug: print column names
-    print("=== DEBUG stats_table ===")
-    print(paste("Column names:", paste(names(tests_filtered()), collapse = ", ")))
-    
     # Format table with rounded p-values
     table_data <- tests_filtered() %>%
       as.data.frame()
-    
-    print(paste("Column classes:", paste(sapply(table_data, class), collapse = ", ")))
     
     # Round numeric columns safely
     if ("p" %in% names(table_data)) {
@@ -611,9 +587,6 @@ server <- function(input, output, session){
       table_data$contrast_p.adj <- round(as.numeric(table_data$contrast_p.adj), 4)
     }
     
-    print(paste("Final rows:", nrow(table_data)))
-    print("=== END DEBUG ===")
-    
     DT::datatable(
       table_data,
       options = list(
@@ -625,7 +598,84 @@ server <- function(input, output, session){
     ) %>%
       DT::formatStyle(
         'p.adj',
-        background = DT::styleColorBar(c(0, max(table_data$p.adj, na.rm = TRUE)), '#4facfe'),
+        background = DT::styleColorBar(c(0, max(table_data$p.adj, na.rm = TRUE)), '#667eea'),
+        backgroundSize = '95% 80%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      )
+  })
+  
+  # ========== Unified Stats Table (DEG + Regression) ==========
+  output$unified_stats_table <- DT::renderDataTable({
+    req(tests_filtered(), reg_models())
+    
+    # Merge stats and regression tables (without log2FC - that's contrast-specific)
+    stats_data <- tests_filtered() %>%
+      as.data.frame() %>%
+      select(peptide, p, p.adj)
+    
+    reg_data <- reg_models() %>%
+      as.data.frame() %>%
+      select(Peptide, Method, Accuracy, AUC, F1, Recall) %>%
+      rename(peptide = Peptide)
+    
+    unified_data <- stats_data %>%
+      left_join(reg_data, by = "peptide") %>%
+      select(Peptide = peptide, Method, `P-value` = p, `P-adj` = p.adj, 
+             Accuracy, AUC, F1, Recall) %>%
+      mutate(
+        `P-value` = round(as.numeric(`P-value`), 4),
+        `P-adj` = round(as.numeric(`P-adj`), 4),
+        Accuracy = round(as.numeric(Accuracy), 2),
+        AUC = round(as.numeric(AUC), 2),
+        F1 = round(as.numeric(F1), 2),
+        Recall = round(as.numeric(Recall), 2)
+      )
+    
+    DT::datatable(
+      unified_data,
+      options = list(
+        scrollY = "600px",
+        scrollX = TRUE,
+        pageLength = 15,
+        lengthMenu = c(10, 25, 50),
+        columnDefs = list(
+          list(className = 'dt-center', targets = '_all')
+        )
+      ),
+      rownames = FALSE
+    ) %>%
+      DT::formatStyle(
+        'P-adj',
+        background = DT::styleColorBar(c(0, max(unified_data$`P-adj`, na.rm = TRUE)), '#667eea'),
+        backgroundSize = '95% 80%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      ) %>%
+      DT::formatStyle(
+        'AUC',
+        background = DT::styleColorBar(c(0, 1), '#667eea'),
+        backgroundSize = '95% 80%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      ) %>%
+      DT::formatStyle(
+        'F1',
+        background = DT::styleColorBar(c(0, 1), '#667eea'),
+        backgroundSize = '95% 80%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      ) %>%
+      DT::formatStyle(
+        'Accuracy',
+        background = DT::styleColorBar(c(0, 1), '#667eea'),
+        backgroundSize = '95% 80%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      ) %>%
+      DT::formatStyle(
+        'Recall',
+        background = DT::styleColorBar(c(0, 1), '#667eea'),
         backgroundSize = '95% 80%',
         backgroundRepeat = 'no-repeat',
         backgroundPosition = 'center'
@@ -735,7 +785,9 @@ server <- function(input, output, session){
         i = i,
         Method = Method,
         Accuracy = round(metrics$accuracy, 2),
-        AUC = round(metrics$auc, 2)
+        AUC = round(metrics$auc, 2),
+        F1 = round(metrics$f1, 2),
+        Recall = round(metrics$recall, 2)
       ))
     }
     
@@ -749,7 +801,9 @@ server <- function(input, output, session){
       as.data.frame() %>%
       mutate(
         Accuracy = round(Accuracy, 4),
-        AUC = round(AUC, 4)
+        AUC = round(AUC, 4),
+        F1 = round(F1, 4),
+        Recall = round(Recall, 4)
       )
     rownames(table) <- NULL
     
@@ -784,20 +838,20 @@ server <- function(input, output, session){
     db <- database()
     facs <- names(db)[vapply(db, function(x) is.factor(x) || is.character(x), logical(1))]
     facs <- setdiff(facs, "id")
-    selectInput("volcano_group_var", "Variable de contraste", choices = facs)
+    selectInput("volcano_group_var", dark_label("Contrast Variable:"), choices = facs)
   })
   
   # Niveles A y B (contraste binario)
   output$volcano_level_a_ui <- renderUI({
     req(database(), input$volcano_group_var)
     lv <- levels(as.factor(database()[[input$volcano_group_var]]))
-    selectInput("volcano_level_a", "Grupo A", choices = lv)
+    selectInput("volcano_level_a", dark_label("Group A (numerator):"), choices = lv)
   })
   output$volcano_level_b_ui <- renderUI({
     req(database(), input$volcano_group_var)
     lv <- levels(as.factor(database()[[input$volcano_group_var]]))
     sel <- if (length(lv) >= 2) lv[min(2, length(lv))] else lv[1]
-    selectInput("volcano_level_b", "Grupo B", choices = lv, selected = sel)
+    selectInput("volcano_level_b", dark_label("Group B (denominator):"), choices = lv, selected = sel)
   })
   
   # Tabla base para volcano (1 o 2 isotipos)
@@ -1009,9 +1063,6 @@ server <- function(input, output, session){
   output$rocs_plot <- renderPlot({
     req(tests_filtered(), input$stats_plot_var)
     
-    print("=== DEBUG rocs_plot START ===")
-    print(paste("Selected peptide:", input$stats_plot_var))
-    
     peps <- pepdata()
     tmp1 <- database()
     meta <- peps %>% inner_join(tmp1)
@@ -1023,12 +1074,8 @@ server <- function(input, output, session){
       pivot_longer(names_to = "pep", values_to = "Expression", cols = -target) %>% 
       mutate(target = as.factor(target))
     
-    print(paste("Total peptides in df3:", length(unique(df3$pep))))
-    print(paste("Peptide exists?", input$stats_plot_var %in% unique(df3$pep)))
-    
     # Validate that stats_plot_var exists in data
     if (!input$stats_plot_var %in% unique(df3$pep)) {
-      print("ERROR: Peptide not found in data")
       plot.new()
       text(0.5, 0.5, "Selected peptide not found in data", cex = 1.5)
       return()
@@ -1038,12 +1085,8 @@ server <- function(input, output, session){
       filter(pep == input$stats_plot_var) %>%
       filter(!is.na(Expression))
     
-    print(paste("Rows after filter:", nrow(df3)))
-    print(paste("Target levels:", nlevels(df3$target)))
-    
     # Validate minimum data
     if (nrow(df3) < 5) {
-      print("ERROR: Insufficient data")
       plot.new()
       text(0.5, 0.5, "Insufficient data for ROC curve", cex = 1.5)
       return()
@@ -1053,150 +1096,13 @@ server <- function(input, output, session){
     
     # Use modular regression functions
     if (nlevels_target > 2) {
-      print("=== MULTICLASS ROC DEBUGGING ===")
-      print("Using multinomial regression")
-      print(paste("Expression values summary:", paste(summary(df3$Expression), collapse = ", ")))
-      print(paste("Target distribution:", paste(table(df3$target), collapse = ", ")))
-      
       # Multinomial regression
       result <- tryCatch({
-        print("Calling fit_multinomial_regression...")
-        fit_result <- fit_multinomial_regression(
-          expression_data = df3$Expression,
-          target = df3$target
-        )
-        print("fit_multinomial_regression returned successfully")
-        fit_result
-      }, error = function(e) {
-        print(paste("ERROR fitting model:", e$message))
-        print(paste("Error class:", class(e)))
-        print(paste("Traceback:", paste(capture.output(traceback()), collapse = "\n")))
-        plot.new()
-        text(0.5, 0.5, paste("Error fitting model:", e$message), cex = 1.2)
-        return(NULL)
-      })
-      
-      if (is.null(result)) {
-        print("Result is NULL, returning")
-        return()
-      }
-      
-      print("Model fitted successfully")
-      print(paste("Result class:", class(result)))
-      print(paste("Result names:", paste(names(result), collapse = ", ")))
-      print(paste("Probabilities class:", class(result$probabilities)))
-      print(paste("Probabilities dimensions:", paste(dim(result$probabilities), collapse = "x")))
-      print(paste("Probabilities head:", paste(head(result$probabilities, 10), collapse = ", ")))
-      
-      # Calculate ROC curve data
-      roc_data <- tryCatch({
-        print("Calling calculate_roc_curve...")
-        print(paste("Actual length:", length(df3$target)))
-        print(paste("Probabilities nrow:", nrow(result$probabilities)))
-        roc_result <- calculate_roc_curve(
-          actual = df3$target,
-          probabilities = result$probabilities
-        )
-        print("calculate_roc_curve returned successfully")
-        roc_result
-      }, error = function(e) {
-        print(paste("ERROR calculating ROC:", e$message))
-        print(paste("Error class:", class(e)))
-        print(paste("Traceback:", paste(capture.output(traceback()), collapse = "\n")))
-        plot.new()
-        text(0.5, 0.5, paste("Error calculating ROC:", e$message), cex = 1.2, col = "red")
-        return(NULL)
-      })
-      
-      if (is.null(roc_data)) {
-        print("ROC data is NULL, returning")
-        return()
-      }
-      
-      print(paste("ROC data class:", class(roc_data)))
-      print(paste("ROC data rows:", nrow(roc_data)))
-      print(paste("ROC data cols:", ncol(roc_data)))
-      print(paste("ROC data column names:", paste(names(roc_data), collapse = ", ")))
-      print("ROC data head:")
-      print(head(roc_data, 20))
-      
-      # Validate ROC data
-      if (nrow(roc_data) == 0) {
-        print("ERROR: No ROC data generated")
-        plot.new()
-        text(0.5, 0.5, "No ROC data generated", cex = 1.5)
-        return()
-      }
-      
-      # Ensure numeric columns
-      print("Converting specificity and sensitivity to numeric...")
-      roc_data$specificity <- as.numeric(roc_data$specificity)
-      roc_data$sensitivity <- as.numeric(roc_data$sensitivity)
-      print(paste("Specificity range:", min(roc_data$specificity, na.rm = TRUE), "-", max(roc_data$specificity, na.rm = TRUE)))
-      print(paste("Sensitivity range:", min(roc_data$sensitivity, na.rm = TRUE), "-", max(roc_data$sensitivity, na.rm = TRUE)))
-      
-      # Remove NA values
-      roc_data <- roc_data %>% 
-        filter(!is.na(specificity), !is.na(sensitivity))
-      
-      print(paste("ROC data after NA removal:", nrow(roc_data)))
-      
-      if (nrow(roc_data) == 0) {
-        print("ERROR: No valid ROC data points")
-        plot.new()
-        text(0.5, 0.5, "No valid ROC data points", cex = 1.5)
-        return()
-      }
-      
-      print(paste("Unique classes in roc_data:", paste(unique(roc_data$class), collapse = ", ")))
-      print("Creating multiclass ROC plot with ggplot...")
-      
-      plot_obj <- tryCatch({
-        ggplot(roc_data, aes(x = 1 - specificity, y = sensitivity, color = class)) +
-          geom_line(size = 1.5, alpha = 0.8) +
-          geom_point(size = 2, alpha = 0.5) +
-          geom_abline(slope = 1, linetype = "dotted", color = "gray50") +
-          coord_fixed() +
-          theme_microarrai() +
-          labs(
-            color = "Class", 
-            title = "ROC Curves (One-vs-Rest)",
-            x = "1 - Specificity (FPR)",
-            y = "Sensitivity (TPR)"
-          ) +
-          scale_color_microarrai() +
-          scale_fill_microarrai() +
-          theme(
-            legend.position = "right",
-            plot.title = element_text(hjust = 0.5, face = "bold")
-          )
-      }, error = function(e) {
-        print(paste("ERROR creating ggplot:", e$message))
-        print(paste("Traceback:", paste(capture.output(traceback()), collapse = "\n")))
-        plot.new()
-        text(0.5, 0.5, paste("Error creating plot:", e$message), cex = 1.2, col = "red")
-        return(NULL)
-      })
-      
-      if (is.null(plot_obj)) {
-        print("Plot object is NULL, returning")
-        return()
-      }
-      
-      print("Plot created successfully, printing...")
-      print("=== END MULTICLASS ROC DEBUGGING ===")
-      print(plot_obj)
-      plot_obj
-    } else {
-      print("Using binary GLM")
-      # Binary GLM
-      result <- tryCatch({
-        fit_binary_glm(
+        fit_multinomial_regression(
           expression_data = df3$Expression,
           target = df3$target
         )
       }, error = function(e) {
-        print(paste("ERROR fitting binary model:", e$message))
         plot.new()
         text(0.5, 0.5, paste("Error fitting model:", e$message), cex = 1.2)
         return(NULL)
@@ -1204,17 +1110,82 @@ server <- function(input, output, session){
       
       if (is.null(result)) return()
       
-      print("Binary model fitted successfully")
+      # Calculate ROC curve data
+      roc_data <- tryCatch({
+        calculate_roc_curve(
+          actual = df3$target,
+          probabilities = result$probabilities
+        )
+      }, error = function(e) {
+        plot.new()
+        text(0.5, 0.5, paste("Error calculating ROC:", e$message), cex = 1.2, col = "red")
+        return(NULL)
+      })
+      
+      if (is.null(roc_data) || nrow(roc_data) == 0) {
+        plot.new()
+        text(0.5, 0.5, "No ROC data generated", cex = 1.5)
+        return()
+      }
+      
+      # Ensure numeric columns
+      roc_data$specificity <- as.numeric(roc_data$specificity)
+      roc_data$sensitivity <- as.numeric(roc_data$sensitivity)
+      
+      # Remove NA values
+      roc_data <- roc_data %>% 
+        filter(!is.na(specificity), !is.na(sensitivity))
+      
+      if (nrow(roc_data) == 0) {
+        plot.new()
+        text(0.5, 0.5, "No valid ROC data points", cex = 1.5)
+        return()
+      }
+      
+      # Plot multiclass ROC
+      plot_obj <- ggplot(roc_data, aes(x = 1 - specificity, y = sensitivity, color = class)) +
+        geom_line(size = 1.5, alpha = 0.8) +
+        geom_point(size = 2, alpha = 0.5) +
+        geom_abline(slope = 1, linetype = "dotted", color = "gray50") +
+        coord_fixed() +
+        theme_microarrai() +
+        labs(
+          color = "Class", 
+          title = "ROC Curves (One-vs-Rest)",
+          x = "1 - Specificity (FPR)",
+          y = "Sensitivity (TPR)"
+        ) +
+        scale_color_microarrai() +
+        scale_fill_microarrai() +
+        theme(
+          legend.position = "right",
+          plot.title = element_text(hjust = 0.5, face = "bold")
+        )
+      
+      print(plot_obj)
+      print(plot_obj)
+      plot_obj
+    } else {
+      # Binary GLM
+      result <- tryCatch({
+        fit_binary_glm(
+          expression_data = df3$Expression,
+          target = df3$target
+        )
+      }, error = function(e) {
+        plot.new()
+        text(0.5, 0.5, paste("Error fitting model:", e$message), cex = 1.2)
+        return(NULL)
+      })
+      
+      if (is.null(result)) return()
       
       # Validate probabilities
       if (is.null(result$probabilities) || ncol(result$probabilities) < 2) {
-        print("ERROR: Invalid probability predictions")
         plot.new()
         text(0.5, 0.5, "Error: Invalid probability predictions", cex = 1.5)
         return()
       }
-      
-      print(paste("Probabilities dimensions:", paste(dim(result$probabilities), collapse = "x")))
       
       # Calculate ROC curve data
       roc_data <- calculate_roc_curve(
@@ -1222,11 +1193,7 @@ server <- function(input, output, session){
         probabilities = result$probabilities[, 2]
       )
       
-      print(paste("Binary ROC AUC:", unique(roc_data$auc)))
-      print("Creating binary ROC plot")
-      print("=== DEBUG rocs_plot END ===")
-      
-      # Plot using pROC for binary (NOT interactive, static plot)
+      # Plot using pROC for binary (static plot)
       pROC::plot.roc(
         df3$target, 
         result$probabilities[, 2], 
@@ -1242,222 +1209,111 @@ server <- function(input, output, session){
   })
   
   
-  # ====== RESULTS KPI BOXES ======
-  output$results_kpi_boxes <- renderUI({
+  # Reactive to filter results by AUC threshold
+  results_filtered <- reactive({
     req(tests_filtered())
     req(reg_models())
+    req(input$results_auc_threshold)
     
     results_data <- tests_filtered() %>%
       left_join(reg_models() %>% rename(peptide = Peptide), by = "peptide")
     
+    # Filter by AUC threshold
+    results_data %>% filter(AUC >= input$results_auc_threshold)
+  })
+  
+  # ====== RESULTS KPI BOXES ======
+  output$results_kpi_boxes <- renderUI({
+    req(results_filtered())
+    
+    results_data <- results_filtered()
+    
     total_selected <- nrow(results_data)
-    mean_pval <- mean(results_data$p.adj, na.rm = TRUE)
     mean_auc <- mean(results_data$AUC, na.rm = TRUE)
-    n_ige <- sum(grepl("IgE", results_data$peptide), na.rm = TRUE)
-    n_igg4 <- sum(grepl("IgG4", results_data$peptide), na.rm = TRUE)
-    pct_high_auc <- sum(results_data$AUC >= 0.7, na.rm = TRUE) / total_selected * 100
+    mean_f1 <- mean(results_data$F1, na.rm = TRUE)
+    mean_accuracy <- mean(results_data$Accuracy, na.rm = TRUE)
     
-    kpi_colors <- c("#4facfe", "#00f2fe", "#43e97b", "#38f9d7", "#fa709a", "#fee140")
+    # IgE/IgG4 breakdown (count only, no up/down without specific contrast)
+    ige_data <- results_data %>% filter(grepl("IgE", peptide))
+    igg4_data <- results_data %>% filter(grepl("IgG4", peptide))
     
-    tagList(
-      fluidRow(
+    n_ige <- nrow(ige_data)
+    n_igg4 <- nrow(igg4_data)
+    
+    # Calculate mean AUC per isotype
+    ige_mean_auc <- if(n_ige > 0) round(mean(ige_data$AUC, na.rm = TRUE), 2) else 0
+    igg4_mean_auc <- if(n_igg4 > 0) round(mean(igg4_data$AUC, na.rm = TRUE), 2) else 0
+    
+    kpi_icons <- c("check-circle", "dna", "dna", "bullseye", "trophy", "chart-bar")
+    kpi_data <- list(
+      list(label = "Selected Peptides", value = total_selected, icon = kpi_icons[1]),
+      list(label = "IgE Peptides", 
+           value = n_ige,
+           subtitle = paste0("Mean AUC: ", ige_mean_auc),
+           icon = kpi_icons[2]),
+      list(label = "IgG4 Peptides", 
+           value = n_igg4,
+           subtitle = paste0("Mean AUC: ", igg4_mean_auc),
+           icon = kpi_icons[3]),
+      list(label = "Mean AUC", value = round(mean_auc, 2), icon = kpi_icons[4]),
+      list(label = "Mean F1", value = round(mean_f1, 2), icon = kpi_icons[5]),
+      list(label = "Mean Accuracy", value = round(mean_accuracy, 2), icon = kpi_icons[6])
+    )
+    
+    fluidRow(
+      lapply(1:length(kpi_data), function(i) {
+        kpi <- kpi_data[[i]]
         column(
-          4,
-          tags$div(
-            style = sprintf("
-              background: linear-gradient(135deg, %s 0%%, %s 100%%);
-              padding: 20px;
-              border-radius: 12px;
-              position: relative;
-              overflow: hidden;
-              box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            ", kpi_colors[1], kpi_colors[2]),
-            tags$div(
+          width = 2,
+          div(
+            style = paste0(
+              "background: white;",
+              "border-radius: 12px;",
+              "padding: 20px 15px;",
+              "margin-bottom: 15px;",
+              "min-height: 142px;",
+              "box-shadow: 0 4px 15px rgba(0,0,0,0.1);",
+              "transition: transform 0.3s ease, box-shadow 0.3s ease;",
+              "position: relative;",
+              "overflow: hidden;"
+            ),
+            # Icon background decoration
+            div(
+              style = "position: absolute; right: -10px; top: -10px; opacity: 0.03; font-size: 60px; color: #191c32;",
+              tags$i(class = paste0("fa fa-", kpi$icon))
+            ),
+            # Content
+            div(
               style = "position: relative; z-index: 2;",
               tags$div(
-                style = "display: flex; align-items: center; margin-bottom: 10px;",
-                icon("check-circle", style = "font-size: 18px; color: #191c32; margin-right: 8px;"),
-                tags$span("Selected Peptides", style = "font-size: 14px; color: #191c32; font-weight: 600;")
+                style = "align-items: center; margin-bottom: 10px;",
+                icon(kpi$icon, style = "font-size: 18px; color: #191c32; margin-right: 8px;"),
+                tags$span(kpi$label, style = "font-size: 14px; color: #191c32; font-weight: 600;")
               ),
               tags$div(
                 style = "font-size: 32px; font-weight: bold; color: #191c32; margin: 5px 0;",
-                total_selected
-              )
-            ),
-            tags$div(
-              style = "position: absolute; bottom: -10px; right: -10px; opacity: 0.08;",
-              icon("check-circle", style = "font-size: 60px; color: #191c32;")
-            )
-          )
-        ),
-        column(
-          4,
-          tags$div(
-            style = sprintf("
-              background: linear-gradient(135deg, %s 0%%, %s 100%%);
-              padding: 20px;
-              border-radius: 12px;
-              position: relative;
-              overflow: hidden;
-              box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            ", kpi_colors[3], kpi_colors[4]),
-            tags$div(
-              style = "position: relative; z-index: 2;",
-              tags$div(
-                style = "display: flex; align-items: center; margin-bottom: 10px;",
-                icon("chart-line", style = "font-size: 18px; color: #191c32; margin-right: 8px;"),
-                tags$span("Mean p-value (adj)", style = "font-size: 14px; color: #191c32; font-weight: 600;")
+                kpi$value
               ),
-              tags$div(
-                style = "font-size: 32px; font-weight: bold; color: #191c32; margin: 5px 0;",
-                format(mean_pval, scientific = TRUE, digits = 3)
-              )
-            ),
-            tags$div(
-              style = "position: absolute; bottom: -10px; right: -10px; opacity: 0.08;",
-              icon("chart-line", style = "font-size: 60px; color: #191c32;")
-            )
-          )
-        ),
-        column(
-          4,
-          tags$div(
-            style = sprintf("
-              background: linear-gradient(135deg, %s 0%%, %s 100%%);
-              padding: 20px;
-              border-radius: 12px;
-              position: relative;
-              overflow: hidden;
-              box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            ", kpi_colors[5], kpi_colors[6]),
-            tags$div(
-              style = "position: relative; z-index: 2;",
-              tags$div(
-                style = "display: flex; align-items: center; margin-bottom: 10px;",
-                icon("bullseye", style = "font-size: 18px; color: #191c32; margin-right: 8px;"),
-                tags$span("Mean AUC", style = "font-size: 14px; color: #191c32; font-weight: 600;")
-              ),
-              tags$div(
-                style = "font-size: 32px; font-weight: bold; color: #191c32; margin: 5px 0;",
-                round(mean_auc, 3)
-              )
-            ),
-            tags$div(
-              style = "position: absolute; bottom: -10px; right: -10px; opacity: 0.08;",
-              icon("bullseye", style = "font-size: 60px; color: #191c32;")
+              if (!is.null(kpi$subtitle)) {
+                tags$div(
+                  style = "font-size: 12px; color: #666; margin-top: 5px;",
+                  kpi$subtitle
+                )
+              } else {
+                NULL
+              }
             )
           )
         )
-      ),
-      tags$br(),
-      fluidRow(
-        column(
-          4,
-          tags$div(
-            style = "background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
-              padding: 20px;
-              border-radius: 12px;
-              position: relative;
-              overflow: hidden;
-              box-shadow: 0 4px 15px rgba(0,0,0,0.1);",
-            tags$div(
-              style = "position: relative; z-index: 2;",
-              tags$div(
-                style = "display: flex; align-items: center; margin-bottom: 10px;",
-                icon("dna", style = "font-size: 18px; color: #191c32; margin-right: 8px;"),
-                tags$span("IgE Peptides", style = "font-size: 14px; color: #191c32; font-weight: 600;")
-              ),
-              tags$div(
-                style = "font-size: 32px; font-weight: bold; color: #191c32; margin: 5px 0;",
-                n_ige
-              )
-            ),
-            tags$div(
-              style = "position: absolute; bottom: -10px; right: -10px; opacity: 0.08;",
-              icon("dna", style = "font-size: 60px; color: #191c32;")
-            )
-          )
-        ),
-        column(
-          4,
-          tags$div(
-            style = "background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
-              padding: 20px;
-              border-radius: 12px;
-              position: relative;
-              overflow: hidden;
-              box-shadow: 0 4px 15px rgba(0,0,0,0.1);",
-            tags$div(
-              style = "position: relative; z-index: 2;",
-              tags$div(
-                style = "display: flex; align-items: center; margin-bottom: 10px;",
-                icon("dna", style = "font-size: 18px; color: #191c32; margin-right: 8px;"),
-                tags$span("IgG4 Peptides", style = "font-size: 14px; color: #191c32; font-weight: 600;")
-              ),
-              tags$div(
-                style = "font-size: 32px; font-weight: bold; color: #191c32; margin: 5px 0;",
-                n_igg4
-              )
-            ),
-            tags$div(
-              style = "position: absolute; bottom: -10px; right: -10px; opacity: 0.08;",
-              icon("dna", style = "font-size: 60px; color: #191c32;")
-            )
-          )
-        ),
-        column(
-          4,
-          tags$div(
-            style = "background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%);
-              padding: 20px;
-              border-radius: 12px;
-              position: relative;
-              overflow: hidden;
-              box-shadow: 0 4px 15px rgba(0,0,0,0.1);",
-            tags$div(
-              style = "position: relative; z-index: 2;",
-              tags$div(
-                style = "display: flex; align-items: center; margin-bottom: 10px;",
-                icon("star", style = "font-size: 18px; color: #191c32; margin-right: 8px;"),
-                tags$span("High AUC (≥0.7)", style = "font-size: 14px; color: #191c32; font-weight: 600;")
-              ),
-              tags$div(
-                style = "font-size: 32px; font-weight: bold; color: #191c32; margin: 5px 0;",
-                paste0(round(pct_high_auc, 1), "%")
-              )
-            ),
-            tags$div(
-              style = "position: absolute; bottom: -10px; right: -10px; opacity: 0.08;",
-              icon("star", style = "font-size: 60px; color: #191c32;")
-            )
-          )
-        )
-      ),
-      tags$br(),
-      tags$div(
-        style = "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          padding: 15px;
-          border-radius: 10px;
-          text-align: center;
-          color: white;
-          box-shadow: 0 4px 15px rgba(0,0,0,0.1);",
-        tags$p(
-          style = "margin: 0; font-size: 14px;",
-          HTML(sprintf(
-            "<strong>Analysis Summary:</strong> %d candidate peptides selected with p-value threshold < %s",
-            total_selected,
-            input$pval_threshold
-          ))
-        )
-      )
+      })
     )
   })
   
   # ====== RESULTS DONUT CHART ======
   output$results_donut <- plotly::renderPlotly({
-    req(tests_filtered())
+    req(results_filtered())
     
-    results_data <- tests_filtered()
+    results_data <- results_filtered()
     
     isotype_counts <- data.frame(
       Isotype = c("IgE", "IgG4"),
@@ -1474,7 +1330,7 @@ server <- function(input, output, session){
       type = 'pie',
       hole = 0.6,
       marker = list(
-        colors = c('#4facfe', '#fa709a'),
+        colors = c('#191c32', '#667eea'),
         line = list(color = 'transparent', width = 0)
       ),
       textposition = 'inside',
@@ -1511,11 +1367,11 @@ server <- function(input, output, session){
   
   # ====== RESULTS SUMMARY TEXT ======
   output$results_summary_text <- renderUI({
-    req(tests_filtered())
-    req(reg_models())
+    req(results_filtered())
+    req(input$results_pval_threshold)
+    req(input$results_auc_threshold)
     
-    results_data <- tests_filtered() %>%
-      left_join(reg_models() %>% rename(peptide = Peptide), by = "peptide")
+    results_data <- results_filtered()
     
     num_peptides <- nrow(results_data)
     
@@ -1523,7 +1379,7 @@ server <- function(input, output, session){
       tags$div(
         style = "color: #191c32; padding: 20px;",
         HTML("<h5>No candidate variables identified</h5>
-             <p>Try adjusting the p-value threshold or analysis parameters.</p>")
+             <p>Try adjusting the p-value or AUC thresholds in the filters section.</p>")
       )
     } else {
       # Top 5 peptides by AUC
@@ -1551,15 +1407,15 @@ server <- function(input, output, session){
           })
         ),
         tags$hr(style = "margin: 20px 0; border-color: rgba(25, 28, 50, 0.1);"),
-        tags$p(
-          HTML(sprintf(
-            "<strong>Filtering criteria:</strong><br>
-            • Adjusted p-value < %s<br>
-            • Logistic/multinomial regression models applied<br>
-            • Performance metrics (AUC) calculated for all selected peptides",
-            input$pval_threshold
-          )),
-          style = "font-size: 13px; color: #666;"
+        tags$div(
+          style = "margin-bottom: 15px;",
+          tags$h5("Applied Filters:", style = "color: #191c32; font-weight: bold; margin-bottom: 10px;"),
+          tags$ul(
+            style = "color: #666; line-height: 1.8;",
+            tags$li(paste0("Adjusted p-value < ", input$results_pval_threshold)),
+            tags$li(paste0("Minimum AUC ≥ ", input$results_auc_threshold)),
+            tags$li("Logistic/multinomial regression models applied")
+          )
         )
       )
     }
@@ -1570,24 +1426,21 @@ server <- function(input, output, session){
   
   # Ranking combinando p.adj (↑ significancia) y AUC (↑ rendimiento)
   ml_ranked_peptides <- reactive({
-    req(tests_filtered())
-    base <- tests_filtered() %>% dplyr::select(peptide, p.adj)
+    req(results_filtered())
     
-    # Une con métricas de modelos si existen
-    if (!is.null(reg_models())) {
-      base <- base %>%
-        dplyr::left_join(reg_models() %>% dplyr::rename(peptide = Peptide), by = "peptide")
-    }
+    base <- results_filtered() %>% dplyr::select(peptide, p.adj, AUC)
     
     base %>%
       dplyr::mutate(
-        AUC = dplyr::coalesce(AUC, 0),
         score = (-log10(p.adj)) + AUC
       ) %>%
       dplyr::arrange(dplyr::desc(score))
   })
   
   # Apply selection when button is clicked
+  # ML biomarker selection
+  selected_peptides_ml <- reactiveVal(NULL)
+  
   observeEvent(input$ml_select_peptides, {
     req(ml_ranked_peptides())
     
@@ -1604,13 +1457,7 @@ server <- function(input, output, session){
         pull(peptide)
     }
     
-    updateSelectizeInput(
-      session, 
-      "ml_selected_peptides",
-      choices = ranked$peptide,
-      selected = selected,
-      server = TRUE
-    )
+    selected_peptides_ml(selected)
     
     showNotification(
       paste(length(selected), "peptides selected"),
@@ -1618,53 +1465,60 @@ server <- function(input, output, session){
     )
   })
   
-  # Rellena tabla + selector con mejores candidatos
-  output$ml_selection_table <- DT::renderDT({
-    req(ml_ranked_peptides())
-    DT::datatable(
-      ml_ranked_peptides() %>%
-        select(peptide, p.adj, AUC, Accuracy, score) %>%
-        mutate(
-          p.adj = round(p.adj, 4),
-          AUC = round(AUC, 4),
-          Accuracy = round(Accuracy, 4),
-          score = round(score, 4)
-        ),
-      options = list(
-        pageLength = 10, 
-        scrollY = "300px",
-        dom = 'ftp'
-      ),
-      rownames = FALSE
-    ) %>%
-      DT::formatStyle(
-        'AUC',
-        background = DT::styleColorBar(range(ml_ranked_peptides()$AUC, na.rm = TRUE), '#4facfe'),
-        backgroundSize = '95% 80%',
-        backgroundRepeat = 'no-repeat',
-        backgroundPosition = 'center'
-      )
-  })
-  
-  # Initialize selector when data is ready
-  observeEvent(ml_ranked_peptides(), {
-    ranked <- ml_ranked_peptides()
-    n <- min(nrow(ranked), 20)
+  # Summary of selected peptides
+  output$ml_selection_summary <- renderUI({
+    selected <- selected_peptides_ml()
     
-    updateSelectizeInput(
-      session, 
-      "ml_selected_peptides",
-      choices = ranked$peptide,
-      selected = ranked$peptide[1:n],
-      server = TRUE
+    if (is.null(selected) || length(selected) == 0) {
+      return(
+        tags$div(
+          style = "text-align: center; color: #666;",
+          icon("info-circle", style = "font-size: 48px; margin-bottom: 15px; color: #667eea;"),
+          tags$p("Click 'Apply Selection' to choose biomarkers", style = "font-size: 16px; margin: 0;")
+        )
+      )
+    }
+    
+    ranked <- ml_ranked_peptides()
+    selected_data <- ranked %>% filter(peptide %in% selected)
+    
+    tags$div(
+      style = "text-align: center;",
+      tags$div(
+        style = "font-size: 48px; font-weight: bold; color: #667eea; margin-bottom: 10px;",
+        length(selected)
+      ),
+      tags$div(
+        style = "font-size: 18px; color: #191c32; font-weight: 600; margin-bottom: 20px;",
+        "Peptides Selected"
+      ),
+      tags$hr(style = "margin: 20px 0;"),
+      tags$div(
+        style = "font-size: 14px; color: #191c32;",
+        tags$p(
+          tags$strong("Mean AUC:"), " ", 
+          round(mean(selected_data$AUC, na.rm = TRUE), 3),
+          style = "margin: 5px 0;"
+        ),
+        tags$p(
+          tags$strong("Mean Accuracy:"), " ", 
+          round(mean(selected_data$Accuracy, na.rm = TRUE), 3),
+          style = "margin: 5px 0;"
+        ),
+        tags$p(
+          tags$strong("Mean p-adj:"), " ", 
+          format(mean(selected_data$p.adj, na.rm = TRUE), scientific = TRUE, digits = 3),
+          style = "margin: 5px 0;"
+        )
+      )
     )
-  }, ignoreInit = FALSE)
+  })
   
   # Send selected peptides to ML tab
   observeEvent(input$ml_send_to_tab, {
-    sel <- input$ml_selected_peptides
-    if (length(sel) == 0) {
-      showNotification("Select at least one peptide to send to ML.", type = "warning")
+    sel <- selected_peptides_ml()
+    if (is.null(sel) || length(sel) == 0) {
+      showNotification("Click 'Apply Selection' first to choose peptides.", type = "warning")
       return(NULL)
     }
     selected_biomarkers(sel)
@@ -1675,9 +1529,7 @@ server <- function(input, output, session){
     )
     
     # Switch to ML tab automatically
-    if (!is.null(input$main_tabs)) {
-      updateTabsetPanel(session, "main_tabs", selected = "Machine Learning")
-    }
+    updateTabsetPanel(session, "main_tabs", selected = "Machine Learning")
   })
   # ============================================================================
   
@@ -1728,9 +1580,10 @@ server <- function(input, output, session){
   ################ HEATMAP CON ANOTACION ######################################
   
   rowa <- reactive({
-    req(input$h_target)
+    target_var <- active_target_var()
+    req(target_var)
     df <- meta_data_ML()
-    df %>% dplyr::select(c(input$h_target))
+    df %>% dplyr::select(all_of(target_var))
   })
   
   output$comb_table <- renderTable({
@@ -1740,6 +1593,7 @@ server <- function(input, output, session){
   })
   
   output$Combined_hplot <- renderPlot({
+    req(input$ml_use_heatmap)  # Only render if selected
     req(active_pepdata(), meta_data_ML(), rowa())
     
     df <- meta_data_ML()
@@ -1842,6 +1696,7 @@ server <- function(input, output, session){
   
   ########################## PLOT PCA ############################################
   output$PCA_2d <- renderPlot({
+    req(input$ml_use_pca)  # Only render if selected
     
     df <- meta_data_ML()
     
@@ -1850,7 +1705,7 @@ server <- function(input, output, session){
     pca_result <- compute_pca(pca_data, center = TRUE, scale. = TRUE)
     
     # Get groups
-    groups <- extract_target_groups(df, input$PCA_target)
+    groups <- extract_target_groups(df, active_target_var())
     
     # Calculate variance
     variance <- calculate_pca_variance(stats::prcomp(pca_data, center = TRUE, scale. = TRUE))
@@ -1899,9 +1754,10 @@ server <- function(input, output, session){
   
 
   output$d3_PCA <- renderRglwidget({
+    req(input$ml_use_pca)  # Only render if selected
     # Get PCA coordinates and groups
     pca <- PCA_mod()
-    groups <- extract_target_groups(meta_data_ML(), input$PCA_target)
+    groups <- extract_target_groups(meta_data_ML(), active_target_var())
     
     # Use modular 3D visualization function
     create_3d_pca(
@@ -1927,7 +1783,7 @@ server <- function(input, output, session){
     # Use modular distance matrix function
     compute_distance_matrix(
       data = meta_data_ML(),
-      group_var = input$PCA_target,
+      group_var = active_target_var(),
       distance_method = input$distance_method,
       scale_data = TRUE,
       impute_na = TRUE
@@ -1937,9 +1793,10 @@ server <- function(input, output, session){
   ########################## PLOT PCoA ############################################
   
   output$PCoA_2d <- renderPlot({
+    req(input$ml_use_pcoa)  # Only render if selected
     # Use modular PCoA function
     pcoa_coords <- perform_pcoa(dist.matrix(), k = 2)
-    groups <- extract_target_groups(meta_data_ML(), input$PCA_target)
+    groups <- extract_target_groups(meta_data_ML(), active_target_var())
     
     positions <- pcoa_coords
     positions$target <- groups
@@ -1991,9 +1848,10 @@ server <- function(input, output, session){
   })
   
   output$PCoA_3d <- renderRglwidget({
+    req(input$ml_use_pcoa)  # Only render if selected
     # Use modular PCoA 3D function
     pcoa_coords <- perform_pcoa(dist.matrix(), k = 3)
-    groups <- extract_target_groups(meta_data_ML(), input$PCA_target)
+    groups <- extract_target_groups(meta_data_ML(), active_target_var())
     
     create_3d_pcoa(
       pcoa_coords = pcoa_coords,
@@ -2008,9 +1866,10 @@ server <- function(input, output, session){
   
   ########################## PLOT NMDS ############################################
   output$NMDS_2d <- renderPlot({
+    req(input$ml_use_nmds)  # Only render if selected
     # Use modular NMDS function
     nmds_coords <- perform_nmds(dist.matrix(), k = 2)
-    groups <- extract_target_groups(meta_data_ML(), input$PCA_target)
+    groups <- extract_target_groups(meta_data_ML(), active_target_var())
     
     data <- nmds_coords
     data$target <- groups
@@ -2039,9 +1898,10 @@ server <- function(input, output, session){
   
 
   output$NMDS_3d <- renderRglwidget({
+    req(input$ml_use_nmds)  # Only render if selected
     # Use modular NMDS 3D function
     nmds_coords <- perform_nmds(dist.matrix(), k = 3)
-    groups <- extract_target_groups(meta_data_ML(), input$PCA_target)
+    groups <- extract_target_groups(meta_data_ML(), active_target_var())
     
     create_3d_nmds(
       nmds_coords = nmds_coords,
@@ -2063,7 +1923,7 @@ server <- function(input, output, session){
     # Use modular ML data preparation function
     prepare_ml_data(
       data = meta_data_ML(),
-      group_var = input$PCA_target,
+      group_var = active_target_var(),
       id_column = "id"
     )
   })
@@ -2072,12 +1932,14 @@ server <- function(input, output, session){
   
   ## Modelo C5.0 ##
   variables_c5 <- reactive({
+    req(input$ml_use_c50)  # Only compute if selected
     # Use modular C5.0 functions
     model <- train_c50_model(ML.db(), trials = 50, seed = 120)
     extract_c50_importance(model, top_n = 30)
   })
   
   output$c5.plot <- renderPlot({
+    req(input$ml_use_c50)  # Only render if selected
     # Use modular C5.0 functions
     model <- train_c50_model(ML.db(), trials = 50, seed = 120)
     
@@ -2092,6 +1954,7 @@ server <- function(input, output, session){
   })
   
   output$c5.tree <- renderPlot({
+    req(input$ml_use_c50)  # Only render if selected
     # Use modular C5.0 function
     model <- train_c50_model(ML.db(), trials = 50, seed = 1234)
     plot(model)
@@ -2099,6 +1962,7 @@ server <- function(input, output, session){
   
   
   output$c5.decision <- renderPlot({
+    req(input$ml_use_c50)  # Only render if selected
     # Use modular decision boundary function
     c5_vars <- variables_c5()
     create_decision_boundary_plot(
@@ -2113,12 +1977,14 @@ server <- function(input, output, session){
   })
   ## Random Forest ## 
   variables_rf <- reactive({
+    req(input$ml_use_rf)  # Only compute if selected
     # Use modular Random Forest functions
     model <- train_randomforest_model(ML.db())
     extract_rf_importance(model, top_n = 30)
   })
   
   output$rf.plot <- renderPlot({
+    req(input$ml_use_rf)  # Only render if selected
     # Use modular Random Forest functions
     model <- train_randomforest_model(ML.db())
     
@@ -2135,6 +2001,7 @@ server <- function(input, output, session){
   })
   
   output$rf.decision <- renderPlot({
+    req(input$ml_use_rf)  # Only render if selected
     # Use modular decision boundary function
     rf_vars <- variables_rf()
     create_decision_boundary_plot(
@@ -2151,6 +2018,7 @@ server <- function(input, output, session){
   ## SVM ##
   
   variables_importantes_reactive <- reactive({
+    req(input$ml_use_svm)  # Only compute if selected
     # Use modular RFE function
     df_scaled <- scale_ml_data(ML.db())
     perform_rfe_svm(df_scaled, sizes = c(1:10), cv_folds = 2)
@@ -2159,6 +2027,7 @@ server <- function(input, output, session){
   ## SVM ##
   
   output$svm.plot <- renderPlot({
+    req(input$ml_use_svm)  # Only render if selected
     withProgress(message = 'Running RFE', value = 0, {
       # Use modular scaling and decision boundary functions
       df.scaled <- scale_ml_data(ML.db())
@@ -2187,6 +2056,7 @@ server <- function(input, output, session){
   
   ## Visualización 3D ##
   output$svm3d.plot <- renderPlotly({
+    req(input$ml_use_svm)  # Only render if selected
     withProgress(message = 'Creando gráfico 3D', value = 0, {
       # Use modular scaling function
       df.scaled <- scale_ml_data(ML.db())
@@ -2259,6 +2129,7 @@ server <- function(input, output, session){
   
   ## XGBoost - Selección de variables importantes ##
   variables_xgb <- reactive({
+    req(input$ml_use_xgboost)  # Only compute if selected
     # Use modular XGBoost functions
     xgb_result <- train_xgboost_model(ML.db(), max_depth = 3, eta = 0.1, nrounds = 100)
     extract_xgboost_importance(xgb_result, top_n = 30)
@@ -2267,6 +2138,7 @@ server <- function(input, output, session){
 
   ## XGBoost SHAP ##
   xgb.shap <- reactive({
+    req(input$ml_use_xgboost)  # Only compute if selected
     # Use modular XGBoost and SHAP functions
     xgb_result <- train_xgboost_model(ML.db(), max_depth = 3, eta = 0.1, nrounds = 100)
     calculate_shap_values(xgb_result)
@@ -2274,6 +2146,7 @@ server <- function(input, output, session){
   
 
   output$shap_importance_plot <- renderPlot({
+    req(input$ml_use_xgboost)  # Only render if selected
     shap_values <- xgb.shap()
     sv_importance(shap_values, show_numbers = TRUE) +
       theme_microarrai() +
@@ -2281,6 +2154,7 @@ server <- function(input, output, session){
   })
   
   output$shap_importance_bee_plot <- renderPlot({
+    req(input$ml_use_xgboost)  # Only render if selected
     shap_values <- xgb.shap()
     sv_importance(shap_values, kind = "bee") +
       theme_microarrai() +
@@ -2289,6 +2163,7 @@ server <- function(input, output, session){
   
   # Waterfall plot 
   output$shap_waterfall_plot <- renderPlot({
+    req(input$ml_use_xgboost)  # Only render if selected
     shap_values <- xgb.shap()
     sv_waterfall(shap_values, row_id = 2) +
       ggtitle("Waterfall plot for second prediction") +
@@ -2297,6 +2172,7 @@ server <- function(input, output, session){
   
   # Force plot
   output$shap_force_plot <- renderPlot({
+    req(input$ml_use_xgboost)  # Only render if selected
     shap_values <- xgb.shap()
     sv_force(shap_values, row_id = 2) +
       ggtitle("Force plot for second prediction") +
@@ -2306,30 +2182,59 @@ server <- function(input, output, session){
   
   
   output$venn.plot <- renderPlot({
-    c5_vars <- variables_c5()
-    rf_vars <- variables_rf()
-    svm_vars <- variables_importantes_reactive()
-    xglmb_vars <- variables_xgb()
+    # Build list dynamically based on selected models
+    model_vars <- list()
+    
+    if (!is.null(input$ml_use_c50) && input$ml_use_c50) {
+      model_vars[["C5.0"]] <- variables_c5()
+    }
+    
+    if (!is.null(input$ml_use_rf) && input$ml_use_rf) {
+      model_vars[["Random Forest"]] <- variables_rf()
+    }
+    
+    if (!is.null(input$ml_use_svm) && input$ml_use_svm) {
+      model_vars[["SVM"]] <- variables_importantes_reactive()
+    }
+    
+    if (!is.null(input$ml_use_xgboost) && input$ml_use_xgboost) {
+      model_vars[["XGBoost"]] <- variables_xgb()
+    }
+    
+    # Only render if at least 2 models selected
+    req(length(model_vars) >= 2)
     
     ggvenn(
-      list(
-        "C5.0" = c5_vars,
-        "Random Forest" = rf_vars,
-        "SVM" = svm_vars,
-        "XGLMBoost" = xglmb_vars
-      ),
+      model_vars,
       fill_color = custom_palette,
       stroke_size = 0.5, set_name_size = 4, text_size = 4
     ) +
-      ggtitle("Consensus of Variables across Models")
+      ggtitle("Consensus of Variables across Selected Models")
   })
   
   output$consensus_vars <- renderText({
-    c5_vars <- variables_c5()
-    rf_vars <- variables_rf()
-    svm_vars <- variables_importantes_reactive()
-    xglmb_vars <- variables_xgb()
-    consensus <- Reduce(intersect, list(c5_vars, rf_vars, svm_vars, xglmb_vars))
+    # Build list dynamically based on selected models
+    model_vars <- list()
+    
+    if (!is.null(input$ml_use_c50) && input$ml_use_c50) {
+      model_vars[["C5.0"]] <- variables_c5()
+    }
+    
+    if (!is.null(input$ml_use_rf) && input$ml_use_rf) {
+      model_vars[["Random Forest"]] <- variables_rf()
+    }
+    
+    if (!is.null(input$ml_use_svm) && input$ml_use_svm) {
+      model_vars[["SVM"]] <- variables_importantes_reactive()
+    }
+    
+    if (!is.null(input$ml_use_xgboost) && input$ml_use_xgboost) {
+      model_vars[["XGBoost"]] <- variables_xgb()
+    }
+    
+    req(length(model_vars) >= 2)
+    
+    consensus <- Reduce(intersect, unname(model_vars))
     if (length(consensus) > 0) {
       paste(consensus, collapse = ", ")
     } else {
@@ -2337,7 +2242,206 @@ server <- function(input, output, session){
     }
   })
   
+  # ============================================================================
+  # MACHINE LEARNING - NEW PIPELINE SYSTEM
+  # ============================================================================
   
+  # Hide all ML result sections initially
+  shinyjs::hide("ml_heatmap_section")
+  shinyjs::hide("ml_ordination_section")
+  shinyjs::hide("ml_pca_results")
+  shinyjs::hide("ml_pcoa_results")
+  shinyjs::hide("ml_nmds_results")
+  shinyjs::hide("ml_dbscan_results")
+  shinyjs::hide("ml_plsda_results")
+  shinyjs::hide("ml_c50_results")
+  shinyjs::hide("ml_rf_results")
+  shinyjs::hide("ml_svm_results")
+  shinyjs::hide("ml_xgboost_results")
+  shinyjs::hide("ml_venn_results")
+  
+  # Unified target variable (new system uses ml_target_var, old uses PCA_target/h_target)
+  active_target_var <- reactive({
+    if (!is.null(input$ml_target_var)) {
+      return(input$ml_target_var)
+    } else if (!is.null(input$PCA_target)) {
+      return(input$PCA_target)
+    } else if (!is.null(input$h_target)) {
+      return(input$h_target[1])  # Take first if multiple
+    }
+    NULL
+  })
+  
+  # ML Target Variable Selector
+  output$ml_target_selector <- renderUI({
+    req(database())
+    req(active_pepdata())
+    
+    choices <- colnames(meta_data_ML() %>% 
+                         dplyr::select((ncol(active_pepdata()) + 1):ncol(meta_data_ML())) %>% 
+                         as.data.frame())
+    
+    selectInput(
+      "ml_target_var", 
+      label = NULL,
+      choices = choices,
+      selected = choices[1],
+      width = "100%"
+    )
+  })
+  
+  # Run ML Pipeline
+  observeEvent(input$ml_run_pipeline, {
+    req(input$ml_target_var)
+    
+    # Validate at least one method selected
+    any_unsupervised <- input$ml_use_heatmap || input$ml_use_pca || 
+                        input$ml_use_pcoa || input$ml_use_nmds || 
+                        input$ml_use_dbscan || input$ml_use_plsda
+    
+    any_supervised <- input$ml_use_c50 || input$ml_use_rf || 
+                      input$ml_use_svm || input$ml_use_xgboost
+    
+    if (!any_unsupervised && !any_supervised) {
+      showNotification(
+        "Please select at least one ML method to run.",
+        type = "warning",
+        duration = 5
+      )
+      return()
+    }
+    
+    # Check biomarker selection
+    sel_biomarkers <- selected_biomarkers()
+    if (is.null(sel_biomarkers) || length(sel_biomarkers) == 0) {
+      showNotification(
+        "No biomarkers selected. Using all peptides from the database.",
+        type = "warning",
+        duration = 5
+      )
+    } else {
+      showNotification(
+        paste("Using", length(sel_biomarkers), "selected biomarkers from Peptide tab"),
+        type = "message",
+        duration = 4
+      )
+    }
+    
+    # Run with progress bar
+    withProgress(message = 'Running ML Pipeline...', value = 0, {
+      
+      # Step 1: Show/hide heatmap
+      incProgress(0.1, detail = "Configuring heatmap...")
+      if (input$ml_use_heatmap) {
+        shinyjs::show("ml_heatmap_section")
+      } else {
+        shinyjs::hide("ml_heatmap_section")
+      }
+      
+      # Step 2: Configure unsupervised methods
+      incProgress(0.2, detail = "Configuring unsupervised methods...")
+      
+      # Show ordination section if any ordination method is selected
+      if (input$ml_use_pca || input$ml_use_pcoa || input$ml_use_nmds) {
+        shinyjs::show("ml_ordination_section")
+      } else {
+        shinyjs::hide("ml_ordination_section")
+      }
+      
+      if (input$ml_use_pca) {
+        shinyjs::show("ml_pca_results")
+      } else {
+        shinyjs::hide("ml_pca_results")
+      }
+      
+      if (input$ml_use_pcoa) {
+        shinyjs::show("ml_pcoa_results")
+      } else {
+        shinyjs::hide("ml_pcoa_results")
+      }
+      
+      if (input$ml_use_nmds) {
+        shinyjs::show("ml_nmds_results")
+      } else {
+        shinyjs::hide("ml_nmds_results")
+      }
+      
+      if (input$ml_use_dbscan) {
+        shinyjs::show("ml_dbscan_results")
+      } else {
+        shinyjs::hide("ml_dbscan_results")
+      }
+      
+      if (input$ml_use_plsda) {
+        shinyjs::show("ml_plsda_results")
+      } else {
+        shinyjs::hide("ml_plsda_results")
+      }
+      
+      # Step 3: Configure supervised methods
+      incProgress(0.4, detail = "Configuring supervised methods...")
+      
+      if (input$ml_use_c50) {
+        shinyjs::show("ml_c50_results")
+      } else {
+        shinyjs::hide("ml_c50_results")
+      }
+      
+      if (input$ml_use_rf) {
+        shinyjs::show("ml_rf_results")
+      } else {
+        shinyjs::hide("ml_rf_results")
+      }
+      
+      if (input$ml_use_svm) {
+        shinyjs::show("ml_svm_results")
+      } else {
+        shinyjs::hide("ml_svm_results")
+      }
+      
+      if (input$ml_use_xgboost) {
+        shinyjs::show("ml_xgboost_results")
+      } else {
+        shinyjs::hide("ml_xgboost_results")
+      }
+      
+      # Show Venn diagram if more than one supervised method
+      if (sum(c(input$ml_use_c50, input$ml_use_rf, input$ml_use_svm, input$ml_use_xgboost)) > 1) {
+        shinyjs::show("ml_venn_results")
+      } else {
+        shinyjs::hide("ml_venn_results")
+      }
+      
+      # Step 4: Switch to appropriate tab
+      incProgress(0.6, detail = "Navigating to results...")
+      
+      if (any_unsupervised) {
+        updateTabsetPanel(session, "ml_subtabs", selected = "Unsupervised Learning")
+      } else if (any_supervised) {
+        updateTabsetPanel(session, "ml_subtabs", selected = "Supervised Learning")
+      }
+      
+      # Step 5: Complete
+      incProgress(1, detail = "Pipeline configured successfully!")
+      Sys.sleep(0.5)  # Brief pause to show completion
+    })
+    
+    showNotification(
+      "ML pipeline ready! Results will appear as they are computed.",
+      type = "message",
+      duration = 4
+    )
+  })
+  
+  # ============================================================================
+  # ============================== LEGACY CODE =================================
+  # ============================================================================
+  # Below this line: Original ML outputs that compute the actual results
+  # These use active_target_var() and active_pepdata() (filtered by selected_biomarkers)
+  
+  # ============================================================================
+  # MACHINE LEARNING - LEGACY CODE (TO BE ENCAPSULATED)
+  # ============================================================================
   
   output$explanation <- renderUI({
     tagList(

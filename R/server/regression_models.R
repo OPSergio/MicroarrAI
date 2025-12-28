@@ -302,7 +302,17 @@ calculate_performance_metrics <- function(predictions, actual, probabilities) {
     }
     
     # Calculate macro-average AUC (one-vs-rest)
-    if (is.data.frame(probabilities)) {
+    # Convert matrix to data.frame if needed
+    if (is.matrix(probabilities)) {
+      probabilities <- as.data.frame(probabilities)
+      # Set column names to class levels if missing
+      if (is.null(colnames(probabilities))) {
+        colnames(probabilities) <- levels(actual)
+      }
+    }
+    
+    if (is.data.frame(probabilities) || is.matrix(probabilities)) {
+      probabilities <- as.data.frame(probabilities)
       auc_values <- numeric(nlevels(actual))
       
       for (i in 1:nlevels(actual)) {
@@ -311,24 +321,44 @@ calculate_performance_metrics <- function(predictions, actual, probabilities) {
         # Create binary response (class vs rest)
         binary_response <- ifelse(actual == class_name, 1, 0)
         
-        # Get probability for this class
+        # Get probability for this class (by column index if name not found)
         if (class_name %in% colnames(probabilities)) {
           class_prob <- probabilities[[class_name]]
-          
-          # Calculate ROC
-          roc_obj <- pROC::roc(
-            response = binary_response,
-            predictor = class_prob,
-            levels = c(0, 1),
-            direction = "<"
-          )
-          
-          auc_values[i] <- as.numeric(pROC::auc(roc_obj))
+        } else if (i <= ncol(probabilities)) {
+          class_prob <- probabilities[[i]]
+        } else {
+          next
         }
+        
+        # Calculate ROC
+        roc_obj <- pROC::roc(
+          response = binary_response,
+          predictor = class_prob,
+          levels = c(0, 1),
+          direction = "<"
+        )
+        
+        auc_values[i] <- as.numeric(pROC::auc(roc_obj))
       }
       
       # Macro-average AUC
       auc <- mean(auc_values, na.rm = TRUE)
+    }
+  }
+  
+  # Extract F1 and Recall
+  f1 <- NA
+  recall <- sensitivity  # Recall is the same as Sensitivity
+  
+  if (nlevels(actual) == 2) {
+    # Binary: F1 from byClass
+    if ("F1" %in% names(cm$byClass)) {
+      f1 <- cm$byClass["F1"]
+    }
+  } else {
+    # Multiclass: macro-average F1
+    if ("F1" %in% colnames(cm$byClass)) {
+      f1 <- mean(cm$byClass[, "F1"], na.rm = TRUE)
     }
   }
   
@@ -337,12 +367,15 @@ calculate_performance_metrics <- function(predictions, actual, probabilities) {
     accuracy = as.numeric(accuracy),
     sensitivity = as.numeric(sensitivity),
     specificity = as.numeric(specificity),
+    f1 = as.numeric(f1),
+    recall = as.numeric(recall),
     auc = auc,
     confusion_matrix = cm
   )
   
-  return(metrics)
-}
+    return(metrics)
+  }
+
 
 
 #' Calculate ROC curve data
@@ -424,16 +457,10 @@ calculate_roc_curve <- function(actual, probabilities) {
     
   } else {
     # Multiclass classification
-    print("INSIDE MULTICLASS BLOCK")
     
     if (!is.data.frame(probabilities)) {
-      print("Converting to data.frame")
       probabilities <- as.data.frame(probabilities)
     }
-    
-    print(paste("Probabilities ncol:", ncol(probabilities)))
-    print(paste("Probabilities colnames:", paste(colnames(probabilities), collapse = ", ")))
-    print(paste("Number of classes (nlevels):", nlevels(actual)))
     
     # Initialize list for ROC data
     roc_list <- list()
@@ -441,19 +468,14 @@ calculate_roc_curve <- function(actual, probabilities) {
     # Calculate ROC for each class (one-vs-rest)
     for (i in 1:nlevels(actual)) {
       class_name <- levels(actual)[i]
-      print(paste("Processing class", i, ":", class_name))
       
       # Create binary response
       binary_response <- ifelse(actual == class_name, 1, 0)
-      print(paste("Binary response sum:", sum(binary_response)))
       
       # Get probability for this class - use column index directly
       class_prob <- probabilities[[i]]
-      print(paste("Got probabilities for column", i))
-      print(paste("Prob range:", min(class_prob), "-", max(class_prob)))
       
       # Calculate ROC
-      print("Calling pROC::roc...")
       roc_obj <- tryCatch({
         pROC::roc(
           response = binary_response,
@@ -463,16 +485,13 @@ calculate_roc_curve <- function(actual, probabilities) {
           quiet = TRUE
         )
       }, error = function(e) {
-        print(paste("ERROR:", e$message))
+        warning(paste("Error calculating ROC for class", class_name, ":", e$message))
         return(NULL)
       })
       
       if (is.null(roc_obj)) {
-        print("ROC object is NULL!")
         next
       }
-      
-      print(paste("ROC AUC:", pROC::auc(roc_obj)))
       
       # Store coordinates
       roc_list[[i]] <- data.frame(
@@ -481,16 +500,10 @@ calculate_roc_curve <- function(actual, probabilities) {
         class = class_name,
         auc = as.numeric(pROC::auc(roc_obj))
       )
-      
-      print(paste("Stored", nrow(roc_list[[i]]), "rows for class", class_name))
     }
-    
-    print(paste("Total items in roc_list:", length(roc_list)))
     
     # Combine all ROC curves
     roc_data <- dplyr::bind_rows(roc_list)
-    
-    print(paste("Final roc_data rows:", nrow(roc_data)))
     
     return(roc_data)
   }
