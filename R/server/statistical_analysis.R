@@ -364,6 +364,16 @@ perform_lm_differential_analysis <- function(peptide_data,
                                              target_variable,
                                              test_method = "lm") {
   
+  # Validate target_variable
+  if (is.null(target_variable) || length(target_variable) == 0 || target_variable == "") {
+    stop("target_variable cannot be NULL or empty")
+  }
+  
+  # Validate that target_variable exists in clinical_data
+  if (!target_variable %in% names(clinical_data)) {
+    stop(paste0("Column '", target_variable, "' not found in clinical data"))
+  }
+  
   # Remove near-zero variance peptides
   peps <- peptide_data
   nzv <- caret::nearZeroVar(peps, saveMetrics = TRUE)

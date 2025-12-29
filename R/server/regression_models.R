@@ -16,8 +16,8 @@
 #   - pROC: ROC curves and AUC calculation
 #   - dplyr, tidyr: Data manipulation
 #
-# Author: MicroarrAI Team
-# Last Modified: 2024
+# Author: Sergio Olmos Piñero
+# Last Modified: 2025
 # =============================================================================
 
 #' Fit binary logistic regression (GLM)

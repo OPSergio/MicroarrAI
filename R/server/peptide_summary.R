@@ -98,36 +98,39 @@ calculate_peptide_summary <- function(peptide_data, expression_threshold = 3) {
 create_isotype_donut_chart <- function(isotype_summary, 
                                        colors = c("#191c32", "#667eea", "#00A087FF")) {
   
-  # Calculate percentages of positives
+  # Calculate percentages and coordinates for donut chart
   isotype_summary <- isotype_summary %>%
     dplyr::mutate(
       positive_percentage = round(n_positive_peptides / sum(n_positive_peptides) * 100, 1),
-      label = paste0(Isotype, ": ", n_positive_peptides, " (", positive_percentage, "%)")
+      fraction = n_positive_peptides / sum(n_positive_peptides),
+      ymax = cumsum(fraction),
+      ymin = c(0, head(ymax, n = -1)),
+      labelPosition = (ymax + ymin) / 2,
+      label = paste0(positive_percentage, "%"),
+      tooltip = paste0(
+        "<b>", Isotype, "</b><br/>",
+        "Positive Peptides: ", n_positive_peptides, "<br/>",
+        "Total Peptides: ", n_peptides, "<br/>",
+        "% Positive: ", round(n_positive_peptides / n_peptides * 100, 1), "%<br/>",
+        "Mean Expr: ", round(mean_expression, 2)
+      ),
+      data_id = Isotype
     )
   
-  # Create donut chart with plotly showing positive peptides
-  plot_ly(
-    data = isotype_summary,
-    labels = ~Isotype,
-    values = ~n_positive_peptides,
-    type = 'pie',
-    hole = 0.6,
-    marker = list(colors = colors[1:nrow(isotype_summary)]),
-    textinfo = 'label+percent',
-    hoverinfo = 'text',
-    text = ~paste0(
-      Isotype, "<br>",
-      "Positive Peptides: ", n_positive_peptides, "<br>",
-      "Total Peptides: ", n_peptides, "<br>",
-      "% Positive: ", round(n_positive_peptides / n_peptides * 100, 1), "%<br>",
-      "Mean Expr: ", round(mean_expression, 2)
+  # Create donut chart with ggiraph
+  p <- ggplot(isotype_summary, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 2.5,
+                                    fill = Isotype, tooltip = tooltip, data_id = data_id)) +
+    geom_rect_interactive(color = "white", linewidth = 1.5) +
+    coord_polar(theta = "y") +
+    xlim(c(0, 4)) +
+    scale_fill_manual(values = colors[1:nrow(isotype_summary)]) +
+    theme_void() +
+    theme(
+      legend.position = "bottom",
+      legend.title = element_blank()
     )
-  ) %>%
-    plotly::layout(
-      showlegend = TRUE,
-      legend = list(orientation = "h", y = -0.1),
-      margin = list(t = 20)
-    )
+  
+  apply_girafe(p, width_svg = 4, height_svg = 4)
 }
 
 
@@ -162,7 +165,7 @@ create_summary_value_boxes <- function(summary_stats) {
 }
 
 
-#' Create Styled Summary Table (PowerBI-style)
+#' Create Styled Summary Table
 create_styled_summary_table <- function(per_sample_stats, top_n = 10) {
   
   # Select top N samples by positive peptides
@@ -217,26 +220,30 @@ create_expression_distribution_plot <- function(peptide_data) {
         grepl("^IgE_", peptide, ignore.case = TRUE) ~ "IgE",
         grepl("^IgG4_", peptide, ignore.case = TRUE) ~ "IgG4",
         TRUE ~ "Other"
-      )
+      ),
+      tooltip = paste0(
+        "<b>", Isotype, "</b><br/>",
+        "Expression: ", round(expression, 2)
+      ),
+      data_id = paste0(Isotype, "_", row_number())
     )
   
-  # Create histogram separated by isotype
-  plot_ly(
-    data = expression_values,
-    x = ~expression,
-    color = ~Isotype,
-    colors = c("IgE" = "#667eea", "IgG4" = "#00A087FF", "Other" = "#4DBBD5FF"),
-    type = "histogram",
-    alpha = 0.8,
-    nbinsx = 50
-  ) %>%
-    plotly::layout(
-      xaxis = list(title = "Expression Value"),
-      yaxis = list(title = "Frequency"),
-      barmode = "overlay",
-      showlegend = TRUE,
-      legend = list(orientation = "h", y = -0.15),
-      bargap = 0.1,
-      margin = list(t = 20)
+  # Create histogram with ggiraph and facets
+  p <- ggplot(expression_values, aes(x = expression, fill = Isotype)) +
+    geom_histogram(alpha = 0.8, bins = 40) +
+    facet_wrap(~Isotype, ncol = 1, scales = "free_y") +
+    scale_fill_manual(values = c("IgE" = "#667eea", "IgG4" = "#00A087FF", "Other" = "#4DBBD5FF")) +
+    labs(
+      title = "Expression Distribution by Isotype",
+      x = "Expression Value", 
+      y = "Frequency"
+    ) +
+    theme_microarrai() +
+    theme(
+      legend.position = "none",
+      strip.background = element_rect(fill = "#f4f6f9", color = "#191c32"),
+      strip.text = element_text(face = "bold", size = 11)
     )
+  
+  apply_girafe(p, width_svg = 8, height_svg = 6)
 }

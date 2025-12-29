@@ -9,90 +9,7 @@ ui_peptide <- function() {
   tabPanel(
     title = "Peptide finder",
     
-    # Floating Sidebar (SAME STYLE AS ML)
-    tags$div(
-      id = "peptide-sidebar",
-      class = "ml-sidebar",
-      
-      tags$h4(
-        icon("microscope", style = "margin-right: 10px;"),
-        "Peptide Analysis"
-      ),
-      
-      # Navigation Sections
-      tags$div(
-        class = "ml-sidebar-section",
-        tags$div(class = "ml-sidebar-section-title", "VISUALIZATION"),
-        
-        tags$div(
-          class = "ml-sidebar-item active",
-          `data-target` = "peptide_hplot",
-          icon("fire", style = "margin-right: 10px;"),
-          "Heatmap"
-        )
-      ),
-      
-      tags$div(
-        class = "ml-sidebar-section",
-        tags$div(class = "ml-sidebar-section-title", "OVERVIEW"),
-        
-        tags$div(
-          class = "ml-sidebar-item",
-          `data-target` = "kpi_boxes",
-          icon("chart-pie", style = "margin-right: 10px;"),
-          "Data Overview"
-        )
-      ),
-      
-      tags$div(
-        class = "ml-sidebar-section",
-        tags$div(class = "ml-sidebar-section-title", "ANALYSIS"),
-        
-        tags$div(
-          class = "ml-sidebar-item",
-          `data-target` = "run_analysis_1",
-          icon("flask", style = "margin-right: 10px;"),
-          "Statistical Tests"
-        ),
-        tags$div(
-          class = "ml-sidebar-item",
-          `data-target` = "volcano_div",
-          icon("mountain", style = "margin-right: 10px;"),
-          "Volcano Plot"
-        ),
-        tags$div(
-          class = "ml-sidebar-item",
-          `data-target` = "feature_level_table",
-          icon("dna", style = "margin-right: 10px;"),
-          "Feature Level"
-        ),
-        tags$div(
-          class = "ml-sidebar-item",
-          `data-target` = "results_panel",
-          icon("chart-bar", style = "margin-right: 10px;"),
-          "Results"
-        ),
-        tags$div(
-          class = "ml-sidebar-item",
-          `data-target` = "biomarker_selector",
-          icon("bullseye", style = "margin-right: 10px;"),
-          "Biomarkers"
-        )
-      )
-    ),
-    
-    # Sidebar Toggle Button
-    tags$div(
-      id = "peptide-sidebar-toggle",
-      class = "ml-sidebar-toggle",
-      icon("bars")
-    ),
-    
-    # Main Content
-    tags$div(
-      class = "ml-content",
-      
-      # ===== 1. HEATMAP =====
+    # ===== 1. HEATMAP =====
     tags$div(
       style = "text-align: center;",
       section_title("EXPRESSION HEATMAP", size = "2.5em")
@@ -512,7 +429,6 @@ ui_peptide <- function() {
           )
         )
       )
-    )  # Close ml-content div
+    )
   )
-)    # Close tabPanel
-}      # Close function
+}

@@ -15,8 +15,8 @@
 #   - stats: PCA computation
 #   - dplyr, tidyr: Data manipulation
 #
-# Author: MicroarrAI Team
-# Last Modified: 2024
+# Author: Sergio Olmos Piñero
+# Last Modified: 2025
 # =============================================================================
 
 #' Compute PCA (Principal Component Analysis)

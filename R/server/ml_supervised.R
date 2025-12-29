@@ -10,19 +10,334 @@
 #   - XGBoost with SHAP values (binary and multiclass)
 #   - Feature importance extraction
 #   - Decision boundary visualization support
+#   - Advanced training with RFE and Cross-Validation
 #
 # Dependencies:
 #   - C50: C5.0 decision trees
 #   - randomForest: Random Forest
 #   - e1071: SVM
-#   - caret: RFE, model training
+#   - caret: RFE, model training, cross-validation
 #   - xgboost: Gradient boosting
 #   - shapviz: SHAP value visualization
 #   - dplyr, tidyr: Data manipulation
+#   - pROC: ROC curves and AUC calculation
 #
-# Author: MicroarrAI Team
-# Last Modified: 2024
+# Author: Sergio Olmos Piñero
+# Last Modified: 2025
 # =============================================================================
+
+#' Train model with Cross-Validation and optional RFE
+#'
+#' @description
+#' Comprehensive training function that supports:
+#' - Cross-validation for performance estimation
+#' - Recursive Feature Elimination (RFE) for feature selection
+#' - Multiple model types (C5.0, RF, SVM, XGBoost)
+#' - Hyperparameter tuning
+#'
+#' @param data A data.frame with 'target' column (factor) and numeric predictors
+#' @param model_type Character: "c50", "rf", "svm", or "xgboost"
+#' @param use_rfe Logical. Apply RFE for feature selection (default: FALSE)
+#' @param use_cv Logical. Use cross-validation (default: TRUE)
+#' @param cv_folds Number of CV folds (default: 5)
+#' @param cv_repeats Number of CV repeats (default: 3)
+#' @param tune_params Logical. Perform hyperparameter tuning (default: FALSE)
+#' @param rfe_sizes Vector of feature subset sizes for RFE (default: c(5, 10, 15, 20, 25))
+#'
+#' @return A list with:
+#'   - model: Trained model object
+#'   - cv_results: Cross-validation results (if use_cv = TRUE)
+#'   - rfe_results: RFE results (if use_rfe = TRUE)
+#'   - selected_features: Selected feature names
+#'   - metrics: Performance metrics (accuracy, AUC, etc.)
+#'   - confusion_matrix: Confusion matrix from CV
+#'
+#' @examples
+#' # Basic training with CV
+#' result <- train_model_advanced(data, model_type = "rf", use_cv = TRUE)
+#' 
+#' # Training with RFE
+#' result <- train_model_advanced(data, model_type = "svm", use_rfe = TRUE, use_cv = TRUE)
+#'
+#' @export
+train_model_advanced <- function(data, 
+                                  model_type = c("c50", "rf", "svm", "xgboost"),
+                                  use_rfe = FALSE,
+                                  use_cv = TRUE,
+                                  cv_folds = 5,
+                                  cv_repeats = 3,
+                                  tune_params = FALSE,
+                                  rfe_sizes = c(5, 10, 15, 20, 25)) {
+  
+  model_type <- match.arg(model_type)
+  
+  # Input validation
+  if (!is.data.frame(data)) {
+    stop("Input 'data' must be a data.frame")
+  }
+  
+  if (!"target" %in% colnames(data)) {
+    stop("Data must contain 'target' column")
+  }
+  
+  if (!is.factor(data$target)) {
+    data$target <- as.factor(data$target)
+  }
+  
+  # Initialize result list
+  result <- list(
+    model_type = model_type,
+    use_rfe = use_rfe,
+    use_cv = use_cv,
+    selected_features = NULL,
+    metrics = list(),
+    cv_results = NULL,
+    rfe_results = NULL,
+    model = NULL
+  )
+  
+  # Scale data for SVM
+  if (model_type == "svm") {
+    data <- scale_ml_data(data)
+  }
+  
+  # Step 1: Feature Selection with RFE (if requested)
+  if (use_rfe && model_type %in% c("svm", "rf", "c50")) {
+    message("[RFE] Starting Recursive Feature Elimination...")
+    
+    # Configure RFE control
+    ctrl_rfe <- caret::rfeControl(
+      functions = caret::caretFuncs,
+      method = "cv",
+      number = cv_folds,
+      verbose = FALSE
+    )
+    
+    # Prepare data for RFE
+    x <- data[, -which(names(data) == "target")]
+    y <- data$target
+    
+    # Determine RFE sizes based on data
+    max_features <- min(ncol(x), max(rfe_sizes))
+    rfe_sizes_adj <- rfe_sizes[rfe_sizes <= max_features]
+    
+    # Run RFE
+    rfe_result <- caret::rfe(
+      x = x,
+      y = y,
+      sizes = rfe_sizes_adj,
+      rfeControl = ctrl_rfe,
+      method = ifelse(model_type == "svm", "svmLinear", 
+                     ifelse(model_type == "rf", "rf", "C5.0"))
+    )
+    
+    result$rfe_results <- rfe_result
+    result$selected_features <- caret::predictors(rfe_result)
+    message("[RFE] Completed. Selected ", length(result$selected_features), " features")
+    
+    # Filter data to selected features
+    data <- data[, c("target", result$selected_features)]
+    
+  } else {
+    # Use all features or top N from simple importance
+    result$selected_features <- setdiff(colnames(data), "target")
+  }
+  
+  # Step 2: Cross-Validation Setup
+  # Detect binary vs multiclass for correct summary function
+  num_classes <- length(levels(data$target))
+  is_binary <- num_classes == 2
+  
+  if (use_cv) {
+    ctrl_cv <- caret::trainControl(
+      method = "repeatedcv",
+      number = cv_folds,
+      repeats = cv_repeats,
+      classProbs = TRUE,
+      summaryFunction = if (is_binary) caret::twoClassSummary else caret::multiClassSummary,
+      savePredictions = "final",
+      verboseIter = FALSE,  # FALSE to avoid Shiny console capture issues
+      allowParallel = FALSE  # Disable parallel to avoid hanging
+    )
+  } else {
+    ctrl_cv <- caret::trainControl(
+      method = "none",
+      classProbs = TRUE,
+      savePredictions = "final"
+    )
+  }
+  
+  # Step 3: Hyperparameter Grid (if tuning requested)
+  tune_grid <- NULL
+  
+  if (tune_params) {
+    tune_grid <- switch(model_type,
+      "rf" = expand.grid(mtry = c(2, 5, 10, 15)),
+      "svm" = expand.grid(C = c(0.1, 1, 10, 100)),
+      "xgboost" = expand.grid(
+        nrounds = c(50, 100, 150),
+        max_depth = c(3, 6, 9),
+        eta = c(0.01, 0.1, 0.3),
+        gamma = 0,
+        colsample_bytree = 1,
+        min_child_weight = 1,
+        subsample = 1
+      ),
+      NULL
+    )
+  }
+  
+  # Step 4: Train Model with caret
+  set.seed(123)
+  
+  # Set metric based on binary vs multiclass
+  # Use Kappa for multiclass (more robust than Mean_F1 which requires MLmetrics)
+  train_metric <- if (is_binary) "ROC" else "Kappa"
+  
+  if (use_cv) {
+    message("[CV] Starting ", cv_folds, "-fold CV with ", cv_repeats, " repeats (", cv_folds * cv_repeats, " iterations)...")
+    flush.console()
+  } else {
+    message("[Training] Starting single model training...")
+    flush.console()
+  }
+  
+  message("[DEBUG] About to call caret::train() with metric=", train_metric, "...")
+  flush.console()
+  
+  # Wrap in tryCatch to surface errors in Shiny
+  model_trained <- tryCatch(
+    {
+      caret::train(
+        target ~ .,
+        data = data,
+        method = switch(model_type,
+          "c50" = "C5.0",
+          "rf" = "rf",
+          "svm" = "svmLinear",
+          "xgboost" = "xgbTree"
+        ),
+        trControl = ctrl_cv,
+        tuneGrid = tune_grid,
+        metric = train_metric
+      )
+    },
+    error = function(e) {
+      message("[ERROR] caret::train() failed: ", e$message)
+      flush.console()
+      stop("Model training failed: ", e$message)
+    }
+  )
+  
+  message("[DEBUG] caret::train() finished successfully")
+  flush.console()
+  
+  result$model <- model_trained
+  result$cv_results <- model_trained$results
+  message("[Training] Model training completed")
+  flush.console()
+  
+  # Extract variable importance (unified approach)
+  message("[DEBUG] Extracting variable importance via caret::varImp()")
+  flush.console()
+  
+  varimp <- tryCatch(
+    caret::varImp(model_trained, scale = TRUE),
+    error = function(e) {
+      message("[WARNING] varImp not available: ", e$message)
+      NULL
+    }
+  )
+  
+  result$varimp <- varimp
+  
+  # Step 5: Extract Performance Metrics
+  if (use_cv) {
+    tryCatch({
+      message("[Metrics] Extracting performance metrics...")
+      flush.console()
+      
+      # Get predictions from CV
+      cv_preds <- model_trained$pred
+      
+      if (is.null(cv_preds) || nrow(cv_preds) == 0) {
+        message("[WARNING] No CV predictions available")
+        flush.console()
+      } else {
+        # Calculate confusion matrix
+        cm <- caret::confusionMatrix(cv_preds$pred, cv_preds$obs)
+        
+        result$confusion_matrix <- cm
+        result$metrics$accuracy <- cm$overall["Accuracy"]
+        result$metrics$kappa <- cm$overall["Kappa"]
+        
+        # Handle byClass which can be matrix or vector depending on number of classes
+        if (is.matrix(cm$byClass)) {
+          result$metrics$sensitivity <- mean(cm$byClass[, "Sensitivity"], na.rm = TRUE)
+          result$metrics$specificity <- mean(cm$byClass[, "Specificity"], na.rm = TRUE)
+        } else {
+          result$metrics$sensitivity <- cm$byClass["Sensitivity"]
+          result$metrics$specificity <- cm$byClass["Specificity"]
+        }
+        
+        message("[Metrics] Accuracy: ", round(result$metrics$accuracy, 3))
+        flush.console()
+        
+        # Calculate AUC if probability predictions are available
+        if (all(levels(data$target) %in% colnames(cv_preds))) {
+          if (length(levels(data$target)) == 2) {
+            # Binary classification
+            roc_obj <- pROC::roc(
+              response = cv_preds$obs,
+              predictor = cv_preds[, levels(data$target)[1]],
+              levels = levels(data$target),
+              quiet = TRUE
+            )
+            result$metrics$auc <- as.numeric(pROC::auc(roc_obj))
+            message("[Metrics] AUC: ", round(result$metrics$auc, 3))
+            flush.console()
+          } else {
+            # Multiclass AUC (one-vs-rest average)
+            auc_values <- c()
+            for (class_name in levels(data$target)) {
+              binary_obs <- ifelse(cv_preds$obs == class_name, 1, 0)
+              binary_pred <- cv_preds[, class_name]
+              
+              if (length(unique(binary_obs)) > 1) {
+                roc_obj <- pROC::roc(binary_obs, binary_pred, quiet = TRUE)
+                auc_values <- c(auc_values, as.numeric(pROC::auc(roc_obj)))
+              }
+            }
+            result$metrics$auc <- mean(auc_values, na.rm = TRUE)
+            message("[Metrics] Mean AUC: ", round(result$metrics$auc, 3))
+            flush.console()
+          }
+        } else {
+          message("[WARNING] Probability predictions not available, skipping AUC calculation")
+          flush.console()
+          result$metrics$auc <- NA
+        }
+      }
+      
+      message("[Metrics] Extraction completed successfully")
+      flush.console()
+      
+    }, error = function(e) {
+      message("[ERROR] Failed to extract metrics: ", e$message)
+      flush.console()
+      # Set default values so the function doesn't fail completely
+      result$metrics$accuracy <<- NA
+      result$metrics$auc <<- NA
+      result$metrics$sensitivity <<- NA
+      result$metrics$specificity <<- NA
+    })
+  }
+  
+  message("[COMPLETE] train_model_advanced finished. Returning result object.")
+  flush.console()
+  
+  return(result)
+}
 
 #' Train C5.0 decision tree model
 #'
@@ -97,28 +412,6 @@ train_c50_model <- function(data, trials = 50, rules = FALSE, seed = 120) {
 #' C5.0 importance is based on:
 #' - Usage: How often a variable is used in splits
 #' - Overall: Weighted importance across all trees
-#'
-#' @examples
-#' model <- train_c50_model(data)
-#' top_vars <- extract_c50_importance(model, top_n = 15)
-#'
-#' @export
-extract_c50_importance <- function(model, top_n = 30) {
-  
-  # Extract importance
-  importance <- C50::C5imp(model)
-  
-  # Get top N variables
-  top_vars <- as.data.frame(importance) %>%
-    dplyr::arrange(desc(Overall)) %>%
-    tibble::rownames_to_column(var = "Var") %>%
-    dplyr::slice_head(n = top_n) %>%
-    dplyr::pull(Var)
-  
-  return(top_vars)
-}
-
-
 #' Train Random Forest model
 #'
 #' @description
@@ -200,28 +493,6 @@ train_randomforest_model <- function(data, ntree = 500, mtry = NULL) {
 #' @details
 #' RF importance is based on Mean Decrease in Gini impurity:
 #' Higher values = more important for classification
-#'
-#' @examples
-#' model <- train_randomforest_model(data)
-#' top_vars <- extract_rf_importance(model, top_n = 15)
-#'
-#' @export
-extract_rf_importance <- function(model, top_n = 30) {
-  
-  # Extract importance using caret::varImp
-  importance <- caret::varImp(model)
-  
-  # Get top N variables
-  top_vars <- as.data.frame(importance) %>%
-    dplyr::arrange(desc(Overall)) %>%
-    tibble::rownames_to_column(var = "Var") %>%
-    dplyr::slice_head(n = top_n) %>%
-    dplyr::pull(Var)
-  
-  return(top_vars)
-}
-
-
 #' Perform Recursive Feature Elimination (RFE) for SVM
 #'
 #' @description
@@ -498,34 +769,6 @@ train_xgboost_model <- function(data, max_depth = 3, eta = 0.1, nrounds = 100, v
 #' XGBoost importance metrics:
 #' - Gain: Improvement in accuracy brought by a feature
 #' - Cover: Number of observations related to this feature
-#' - Frequency: Number of times feature is used in trees
-#'
-#' @examples
-#' xgb_result <- train_xgboost_model(data)
-#' top_vars <- extract_xgboost_importance(xgb_result, top_n = 15)
-#'
-#' @export
-extract_xgboost_importance <- function(xgb_result, top_n = 30) {
-  
-  # Extract model and training matrix
-  model <- xgb_result$model
-  matrix_train <- xgb_result$matrix_train
-  
-  # Get importance
-  importance <- xgboost::xgb.importance(
-    feature_names = colnames(matrix_train), 
-    model = model
-  )
-  
-  # Get top N variables by Gain
-  top_vars <- importance %>%
-    dplyr::arrange(desc(Gain)) %>%
-    dplyr::slice_head(n = top_n) %>%
-    dplyr::pull(Feature)
-  
-  return(top_vars)
-}
-
 
 #' Calculate SHAP values for XGBoost model
 #'
@@ -764,21 +1007,218 @@ create_decision_boundary_plot <- function(data, model_type, important_vars,
   grid$target <- predict(model_2d, grid)
   grid$target <- as.factor(grid$target)
   
+  # Add tooltips to actual data points
+  data_2d$tooltip <- paste0(
+    "<b>Prediction: ", data_2d$target, "</b><br/>",
+    predictors[1], ": ", round(data_2d[[predictors[1]]], 2), "<br/>",
+    predictors[2], ": ", round(data_2d[[predictors[2]]], 2)
+  )
+  data_2d$data_id <- seq_len(nrow(data_2d))
+  
   # Create plot using aes() with .data pronoun for dynamic variable names
   plot <- ggplot2::ggplot(data_2d, ggplot2::aes(
     x = .data[[predictors[1]]], 
     y = .data[[predictors[2]]], 
     color = target
   )) +
-    ggplot2::geom_point(size = 2) +
+    # Background grid (decision boundary)
     ggplot2::geom_point(
       data = grid, 
       ggplot2::aes(x = .data[[predictors[1]]], y = .data[[predictors[2]]], color = target), 
-      alpha = 0.1, 
-      size = 1.5
+      alpha = 0.08, 
+      size = 1.2,
+      show.legend = FALSE
+    ) +
+    # Actual data points (interactive)
+    ggiraph::geom_point_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = data_id),
+      size = 3,
+      alpha = 0.9
     ) +
     ggplot2::labs(title = plot_title) +
     ggplot2::theme_minimal()
   
   return(plot)
 }
+
+
+#' Create performance summary UI cards
+#'
+#' @description
+#' Generates HTML cards summarizing model performance metrics, similar to
+#' DBSCAN and PLS-DA summary cards.
+#'
+#' @param result Output from train_model_advanced()
+#' @param model_name Character. Display name of the model (e.g., "Random Forest")
+#'
+#' @return A Shiny tagList with performance metric cards
+#'
+#' @details
+#' Creates visually appealing summary cards showing:
+#' - Accuracy with confidence interval
+#' - AUC score
+#' - Sensitivity and Specificity
+#' - Number of features used
+#' - CV configuration (if used)
+#' - RFE status (if used)
+#'
+#' @examples
+#' result <- train_model_advanced(data, "rf", use_cv = TRUE)
+#' ui_cards <- create_performance_summary_cards(result, "Random Forest")
+#'
+#' @export
+
+#' Format Variable Importance DataFrame (Unified Approach)
+#'
+#' Normalizes variable importance from any caret varImp object to consistent format
+#' with Feature and Importance columns only (no model-specific columns)
+#'
+#' @param varimp_obj varImp object from caret::varImp()
+#' @param top_n Number of top features to return
+#' @return Data frame with Feature and Importance columns, or NULL if unavailable
+#' @export
+format_varimp_df <- function(varimp_obj, top_n = 30) {
+  if (is.null(varimp_obj)) return(NULL)
+  
+  df <- as.data.frame(varimp_obj$importance)
+  
+  df <- df %>%
+    tibble::rownames_to_column("Feature") %>%
+    dplyr::rename(Importance = Overall) %>%
+    dplyr::arrange(desc(Importance)) %>%
+    dplyr::slice_head(n = top_n)
+  
+  return(df)
+}
+
+#' Plot Variable Importance Histogram (Unified Approach)
+#'
+#' Creates a horizontal bar plot of feature importance from standardized format
+#'
+#' @param varimp_df Data frame with Feature and Importance columns
+#' @return ggplot2 object
+#' @export
+plot_varimp_histogram <- function(varimp_df) {
+  if (is.null(varimp_df) || nrow(varimp_df) == 0) {
+    return(
+      ggplot2::ggplot() +
+        ggplot2::annotate("text", x = 0, y = 0, label = "No variable importance available") +
+        ggplot2::theme_void()
+    )
+  }
+  
+  ggplot2::ggplot(
+    varimp_df,
+    ggplot2::aes(
+      x = reorder(Feature, Importance),
+      y = Importance
+    )
+  ) +
+    ggplot2::geom_col(fill = "#667eea", alpha = 0.85) +
+    ggplot2::coord_flip() +
+    ggplot2::labs(
+      title = "Feature Importance",
+      x = NULL,
+      y = "Relative importance"
+    ) +
+    ggplot2::theme_minimal()
+}
+
+create_performance_summary_cards <- function(result, model_name) {
+  
+  # Extract metrics
+  accuracy <- ifelse(!is.null(result$metrics$accuracy), 
+                    round(result$metrics$accuracy * 100, 1), 
+                    NA)
+  auc <- ifelse(!is.null(result$metrics$auc), 
+               round(result$metrics$auc, 3), 
+               NA)
+  sensitivity <- ifelse(!is.null(result$metrics$sensitivity), 
+                       round(result$metrics$sensitivity * 100, 1), 
+                       NA)
+  specificity <- ifelse(!is.null(result$metrics$specificity), 
+                       round(result$metrics$specificity * 100, 1), 
+                       NA)
+  
+  n_features <- length(result$selected_features)
+  
+  # Build method description
+  method_parts <- c(model_name)
+  if (result$use_rfe) method_parts <- c(method_parts, "RFE")
+  if (result$use_cv) method_parts <- c(method_parts, paste0(result$model$control$number, "-Fold CV"))
+  method_desc <- paste(method_parts, collapse = " + ")
+  
+  # Create card UI - COMPACT VERSION
+  shiny::tagList(
+    tags$div(
+      style = "background: #f5f5f5; padding: 12px; border-radius: 6px; margin-bottom: 12px;",
+      
+      # Metrics in single row
+      fluidRow(
+        column(3,
+          tags$div(
+            style = "background: white; border-radius: 4px; padding: 10px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
+            tags$div(
+              style = "font-size: 1.5em; font-weight: 700; color: #4caf50;",
+              ifelse(!is.na(accuracy), paste0(accuracy, "%"), "N/A")
+            ),
+            tags$div(
+              style = "color: #666; font-size: 0.75em; margin-top: 3px;",
+              strong("Accuracy")
+            )
+          )
+        ),
+        column(3,
+          tags$div(
+            style = "background: white; border-radius: 4px; padding: 10px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
+            tags$div(
+              style = "font-size: 1.5em; font-weight: 700; color: #667eea;",
+              ifelse(!is.na(auc), auc, "N/A")
+            ),
+            tags$div(
+              style = "color: #666; font-size: 0.75em; margin-top: 3px;",
+              strong("AUC")
+            )
+          )
+        ),
+        column(3,
+          tags$div(
+            style = "background: white; border-radius: 4px; padding: 10px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
+            tags$div(
+              style = "font-size: 1.5em; font-weight: 700; color: #ff9800;",
+              ifelse(!is.na(sensitivity), paste0(sensitivity, "%"), "N/A")
+            ),
+            tags$div(
+              style = "color: #666; font-size: 0.75em; margin-top: 3px;",
+              strong("Sens")
+            )
+          )
+        ),
+        column(3,
+          tags$div(
+            style = "background: white; border-radius: 4px; padding: 10px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
+            tags$div(
+              style = "font-size: 1.5em; font-weight: 700; color: #2196F3;",
+              ifelse(!is.na(specificity), paste0(specificity, "%"), "N/A")
+            ),
+            tags$div(
+              style = "color: #666; font-size: 0.75em; margin-top: 3px;",
+              strong("Spec")
+            )
+          )
+        )
+      ),
+      
+      # Compact info line
+      tags$div(
+        style = "margin-top: 10px; padding: 8px; background: white; border-radius: 4px; font-size: 12px; color: #666;",
+        tags$span(
+          icon("cogs", style = "color: #667eea; margin-right: 5px;"),
+          strong(method_desc), " | ",
+          n_features, " features"
+        )
+      )
+    )
+  )
+}
+

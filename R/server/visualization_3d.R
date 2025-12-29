@@ -15,8 +15,8 @@
 #   - car: scatter3d function
 #   - dplyr: Data manipulation
 #
-# Author: MicroarrAI Team
-# Last Modified: 2024
+# Author: Sergio Olmos Piñero
+# Last Modified: 2025
 # =============================================================================
 
 #' Create 3D scatter plot with rgl

@@ -336,13 +336,13 @@ server <- function(input, output, session){
   })
   
   # Isotype donut chart
-  output$isotype_donut <- renderPlotly({
+  output$isotype_donut <- renderGirafe({
     req(peptide_summary())
     create_isotype_donut_chart(peptide_summary()$isotype_summary)
   })
   
   # Expression distribution plot
-  output$expression_dist_plot <- renderPlotly({
+  output$expression_dist_plot <- renderGirafe({
     req(pepdata())
     create_expression_distribution_plot(pepdata())
   })
@@ -511,7 +511,7 @@ server <- function(input, output, session){
 
   tests <- eventReactive(input$run_analysis_1, {
     req(input$analysis_type == "Comparison between groups (Classification)")  
-    req(pepdata(), database())
+    req(pepdata(), database(), input$stats)  # Added input$stats validation
     
     # Always use Linear Model-based differential analysis
     lm_results <- perform_lm_differential_analysis(
@@ -612,16 +612,16 @@ server <- function(input, output, session){
     # Merge stats and regression tables (without log2FC - that's contrast-specific)
     stats_data <- tests_filtered() %>%
       as.data.frame() %>%
-      select(peptide, p, p.adj)
+      dplyr::select(peptide, p, p.adj)
     
     reg_data <- reg_models() %>%
       as.data.frame() %>%
-      select(Peptide, Method, Accuracy, AUC, F1, Recall) %>%
-      rename(peptide = Peptide)
+      dplyr::select(Peptide, Method, Accuracy, AUC, F1, Recall) %>%
+      dplyr::rename(peptide = Peptide)
     
     unified_data <- stats_data %>%
-      left_join(reg_data, by = "peptide") %>%
-      select(Peptide = peptide, Method, `P-value` = p, `P-adj` = p.adj, 
+      dplyr::left_join(reg_data, by = "peptide") %>%
+      dplyr::select(Peptide = peptide, Method, `P-value` = p, `P-adj` = p.adj, 
              Accuracy, AUC, F1, Recall) %>%
       mutate(
         `P-value` = round(as.numeric(`P-value`), 4),
@@ -692,7 +692,7 @@ server <- function(input, output, session){
   })
   
   
-  output$stats_plot <- renderPlotly({
+  output$stats_plot <- renderGirafe({
     req(tests_filtered(), input$stats_plot_var)
     peps <- pepdata()
     tmp1 <- database()
@@ -706,32 +706,42 @@ server <- function(input, output, session){
     
     # Validate that stats_plot_var exists in data
     if (!input$stats_plot_var %in% unique(df3$pep)) {
-      return(plotly::plot_ly())
+      return(NULL)
     }
     
-    # Create ggplot
-    p <- df3 %>% filter(pep == input$stats_plot_var) %>% 
-      ggplot(aes(x= as.factor(target), y= Expression, color = target,
-                 fill = target)) +
-      geom_point(size=2,
-                 alpha= 0.7,
-                 position=position_jitter(width = .1)) +
+    # Prepare data with tooltips
+    plot_data <- df3 %>% 
+      filter(pep == input$stats_plot_var) %>%
+      mutate(
+        tooltip = paste0(
+          "<b>", target, "</b><br/>",
+          "Expression: ", round(Expression, 2)
+        ),
+        data_id = paste0(target, "_", row_number())
+      )
+    
+    # Create ggplot with interactive geoms
+    p <- ggplot(plot_data, aes(x = as.factor(target), y = Expression, color = target,
+                                fill = target)) +
+      geom_point_interactive(aes(tooltip = tooltip, data_id = data_id),
+                             size = 2,
+                             alpha = 0.7,
+                             position = position_jitter(width = .1)) +
       geom_boxplot(lwd = 0.8,
-                   width= 0.3,
-                   alpha= 0,
-                   outlier.color="red",
-                   outlier.fill="red",
-                   outlier.size=5) +
+                   width = 0.3,
+                   alpha = 0,
+                   outlier.color = "red",
+                   outlier.fill = "red",
+                   outlier.size = 5) +
       labs(subtitle = input$stats_plot_var) +
       xlab("") +
-      stat_boxplot(geom= "errorbar", width= 0.2, alpha= .6) +
-      geom_violin(alpha= .1, lwd= 0.5, width= .6, alpha= .6) +
+      stat_boxplot(geom = "errorbar", width = 0.2, alpha = .6) +
+      geom_violin(alpha = .1, lwd = 0.5, width = .6, alpha = .6) +
       theme_microarrai() +
       scale_color_microarrai() +
       scale_fill_microarrai()
     
-    # Convert to plotly for interactivity
-    plotly::ggplotly(p, tooltip = c("x", "y"))
+    apply_girafe(p, width_svg = 10, height_svg = 7)
   })
   #################### Logistic regression ####################################
   
@@ -943,10 +953,10 @@ server <- function(input, output, session){
   })
   
   
-  # Contenedor del gráfico (plot o plotly)
+  # Contenedor del gráfico (plot o ggiraph)
   output$volcano_plot_container <- renderUI({
     if (isTRUE(input$volcano_interactive)) {
-      plotlyOutput("volcano_plotly", height = "540px")
+      girafeOutput("volcano_plotly", height = "540px")
     } else {
       plotOutput("volcano_plot", height = "540px")
     }
@@ -980,23 +990,30 @@ server <- function(input, output, session){
   })
   
   # Volcano interactivo
-  output$volcano_plotly <- plotly::renderPlotly({
+  output$volcano_plotly <- renderGirafe({
     tb <- volcano_tbl()
     thr_y <- -log10(input$volcano_padj_thr)
     
+    # Prepare data with tooltips
+    tb <- tb %>%
+      mutate(
+        tooltip = paste0(
+          "<b>", peptide, "</b><br/>",
+          "Isotype: ", isotype, "<br/>",
+          "log2FC: ", round(log2FC, 2), "<br/>",
+          "FDR: ", round(padj, 4), "<br/>",
+          "nA: ", nA, "  nB: ", nB
+        ),
+        data_id = peptide
+      )
+    
     gp <- ggplot(tb, aes(
       x = log2FC, y = neglog10_padj, color = status, shape = isotype,
-      text = paste0(
-        "<b>", peptide, "</b>",
-        "<br>Isotype: ", isotype,
-        "<br>log2FC: ", round(log2FC, 2),
-        "<br>FDR: ", round(padj, 4),
-        "<br>nA: ", nA, "  nB: ", nB
-      )
+      tooltip = tooltip, data_id = data_id
     )) +
       geom_hline(yintercept = thr_y, linetype = "dashed") +
       geom_vline(xintercept = c(-input$volcano_lfc_thr, input$volcano_lfc_thr), linetype = "dashed") +
-      geom_point(alpha = 0.9, size = 2.2) +
+      geom_point_interactive(alpha = 0.9, size = 2.2) +
       scale_color_manual(values = volcano_colors) +
       scale_shape_manual(values = c(IgE = 16, IgG4 = 17, Mixed = 15)) +
       theme_microarrai() +
@@ -1013,11 +1030,7 @@ server <- function(input, output, session){
       gp <- gp + facet_wrap(~isotype, nrow = 1, scales = "free_x")
     }
     
-    plotly::ggplotly(gp, tooltip = "text") %>%
-      plotly::layout(
-        legend = list(orientation = "v", x = 1.02, xanchor = "left", y = 1, yanchor = "top"),
-        margin = list(r = 140)
-      )
+    apply_girafe(gp, width_svg = 12, height_svg = 8)
   })
   
   # Tabla de “hits”
@@ -1310,7 +1323,7 @@ server <- function(input, output, session){
   })
   
   # ====== RESULTS DONUT CHART ======
-  output$results_donut <- plotly::renderPlotly({
+  output$results_donut <- renderGirafe({
     req(results_filtered())
     
     results_data <- results_filtered()
@@ -1321,48 +1334,33 @@ server <- function(input, output, session){
         sum(grepl("IgE", results_data$peptide)),
         sum(grepl("IgG4", results_data$peptide))
       )
-    )
-    
-    plotly::plot_ly(
-      isotype_counts,
-      labels = ~Isotype,
-      values = ~Count,
-      type = 'pie',
-      hole = 0.6,
-      marker = list(
-        colors = c('#191c32', '#667eea'),
-        line = list(color = 'transparent', width = 0)
-      ),
-      textposition = 'inside',
-      textinfo = 'label+percent',
-      textfont = list(size = 14, color = 'white', family = 'Arial'),
-      hoverinfo = 'label+value+percent',
-      showlegend = TRUE
     ) %>%
-      plotly::layout(
-        paper_bgcolor = 'transparent',
-        plot_bgcolor = 'transparent',
-        margin = list(l = 20, r = 20, t = 40, b = 20),
-        legend = list(
-          orientation = 'h',
-          x = 0.5,
-          xanchor = 'center',
-          y = -0.1,
-          font = list(size = 12, color = '#191c32')
+      mutate(
+        fraction = Count / sum(Count),
+        ymax = cumsum(fraction),
+        ymin = c(0, head(ymax, n = -1)),
+        percentage = round(fraction * 100, 1),
+        tooltip = paste0(
+          "<b>", Isotype, "</b><br/>",
+          "Count: ", Count, "<br/>",
+          "Percentage: ", percentage, "%"
         ),
-        annotations = list(
-          list(
-            text = paste0("<b>", sum(isotype_counts$Count), "</b><br>Total"),
-            x = 0.5,
-            y = 0.5,
-            xref = 'paper',
-            yref = 'paper',
-            showarrow = FALSE,
-            font = list(size = 20, color = '#191c32', family = 'Arial')
-          )
-        )
-      ) %>%
-      plotly::config(displayModeBar = FALSE)
+        data_id = Isotype
+      )
+    
+    p <- ggplot(isotype_counts, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 2.5,
+                                     fill = Isotype, tooltip = tooltip, data_id = data_id)) +
+      geom_rect_interactive(color = "white", linewidth = 1.5) +
+      coord_polar(theta = "y") +
+      xlim(c(0, 4)) +
+      scale_fill_manual(values = c("IgE" = "#191c32", "IgG4" = "#667eea")) +
+      theme_void() +
+      theme(
+        legend.position = "bottom",
+        legend.title = element_blank()
+      )
+    
+    apply_girafe(p, width_svg = 4, height_svg = 4)
   })
   
   # ====== RESULTS SUMMARY TEXT ======
@@ -1611,10 +1609,10 @@ server <- function(input, output, session){
     
     iso <- split_isotype_mats(mat)
     
-    # Define color palette with app background for 0 values
-    ige_colors <- colorRampPalette(c("#f4f6f9", "#d0e8f2", "lightgreen", "green"))(50)
-    igg4_colors <- colorRampPalette(c("#f4f6f9", "#ffd6e0", "#ff9999", "red"))(50)
-    default_colors <- colorRampPalette(c("#f4f6f9", "#d0e8f2", "lightgreen", "green"))(50)
+    # Define color palette matching Peptide heatmap (dark background for 0 values)
+    ige_colors <- colorRampPalette(c("#191c32","lightgreen", "green"))(50)
+    igg4_colors <- colorRampPalette(c("#191c32", "#fd6b6bff", "red"))(50)
+    default_colors <- colorRampPalette(c("#191c32", "lightgreen", "green"))(50)
     
     if (iso$any_iso) {
       ht_list <- NULL
@@ -1623,10 +1621,14 @@ server <- function(input, output, session){
           iso$ige, name = "IgE",
           col = ige_colors,
           cluster_rows = TRUE, cluster_columns = TRUE, border = FALSE,
+          show_column_names = FALSE,
+          show_row_names = FALSE,
+          row_dend_gp = grid::gpar(col = "#191c32"),
+          column_dend_gp = grid::gpar(col = "#191c32"),
           heatmap_legend_param = list(
             border = "#191c32",
-            title_gp = grid::gpar(fontsize = 10, fontface = "bold"),
-            labels_gp = grid::gpar(fontsize = 9)
+            title_gp = grid::gpar(fontsize = 10, fontface = "bold", col = "#191c32"),
+            labels_gp = grid::gpar(fontsize = 9, col = "#191c32")
           )
         )
         ht_list <- ht_ige
@@ -1636,10 +1638,14 @@ server <- function(input, output, session){
           iso$igg4, name = "IgG4",
           col = igg4_colors,
           cluster_rows = TRUE, cluster_columns = TRUE, border = FALSE,
+          show_column_names = FALSE,
+          show_row_names = FALSE,
+          row_dend_gp = grid::gpar(col = "#191c32"),
+          column_dend_gp = grid::gpar(col = "#191c32"),
           heatmap_legend_param = list(
             border = "#191c32",
-            title_gp = grid::gpar(fontsize = 10, fontface = "bold"),
-            labels_gp = grid::gpar(fontsize = 9)
+            title_gp = grid::gpar(fontsize = 10, fontface = "bold", col = "#191c32"),
+            labels_gp = grid::gpar(fontsize = 9, col = "#191c32")
           )
         )
         ht_list <- if (is.null(ht_list)) ht_igg4 else (ht_list + ht_igg4)
@@ -1695,7 +1701,7 @@ server <- function(input, output, session){
   
   
   ########################## PLOT PCA ############################################
-  output$PCA_2d <- renderPlot({
+  output$PCA_2d <- renderGirafe({
     req(input$ml_use_pca)  # Only render if selected
     
     df <- meta_data_ML()
@@ -1712,12 +1718,21 @@ server <- function(input, output, session){
     var_pc1 <- round(variance[1], 1)
     var_pc2 <- round(variance[2], 1)
     
-    # Prepare plot data
+    # Prepare plot data with tooltips
     pca_df <- pca_result
     pca_df$target <- groups
+    pca_df$sample_id <- df$id
+    pca_df$tooltip <- paste0(
+      "<b>Sample: ", pca_df$sample_id, "</b><br/>",
+      "Group: ", pca_df$target, "<br/>",
+      "PC1: ", round(pca_df$PC1, 2), "<br/>",
+      "PC2: ", round(pca_df$PC2, 2)
+    )
+    pca_df$data_id <- pca_df$sample_id
     
-    ggplot(pca_df, aes(x = PC1, y = PC2, color = target, fill = target)) +
-      geom_point(size = 3, alpha = 0.7) +  
+    p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = target, fill = target,
+                             tooltip = tooltip, data_id = data_id)) +
+      geom_point_interactive(size = 3, alpha = 0.7) +  
       stat_ellipse(level = 0.95, alpha = 0.2) +  
       labs(
         x = paste0("PC1 (", var_pc1, "% Varianza)"),
@@ -1727,11 +1742,13 @@ server <- function(input, output, session){
       theme_microarrai() +
       scale_color_microarrai() +
       scale_fill_microarrai()
+    
+    apply_girafe(p, width_svg = 10, height_svg = 7)
   })
   
   PCA_mod <- reactive({
     df1 <- meta_data_ML()
-    PCA_DB <- df1 %>% dplyr::select(1: ncol(active_pepdata())) %>% select_if(funs(is.numeric(.)))
+    PCA_DB <- df1 %>% dplyr::select(1: ncol(active_pepdata())) %>% select_if(is.numeric)
     PCA_DB[is.na(PCA_DB)] <- 0
     
     # Use modular PCA function
@@ -1776,15 +1793,29 @@ server <- function(input, output, session){
     paste("Ellipsoid:", ellipsoid_PCA(), "| Surface:", surface_PCA())
   })
   
-  ########################## PCoA + NMDS dist.matrix ############################################
-  dist.matrix <- reactive({
-    req(input$distance_method)
+  ########################## PCoA dist.matrix ############################################
+  pcoa_dist_matrix <- reactive({
+    req(input$pcoa_distance_method)
     
     # Use modular distance matrix function
     compute_distance_matrix(
       data = meta_data_ML(),
       group_var = active_target_var(),
-      distance_method = input$distance_method,
+      distance_method = input$pcoa_distance_method,
+      scale_data = TRUE,
+      impute_na = TRUE
+    )
+  })
+  
+  ########################## NMDS dist.matrix ############################################
+  nmds_dist_matrix <- reactive({
+    req(input$nmds_distance_method)
+    
+    # Use modular distance matrix function
+    compute_distance_matrix(
+      data = meta_data_ML(),
+      group_var = active_target_var(),
+      distance_method = input$nmds_distance_method,
       scale_data = TRUE,
       impute_na = TRUE
     )
@@ -1792,46 +1823,39 @@ server <- function(input, output, session){
   
   ########################## PLOT PCoA ############################################
   
-  output$PCoA_2d <- renderPlot({
+  output$PCoA_2d <- renderGirafe({
     req(input$ml_use_pcoa)  # Only render if selected
     # Use modular PCoA function
-    pcoa_coords <- perform_pcoa(dist.matrix(), k = 2)
+    pcoa_coords <- perform_pcoa(pcoa_dist_matrix(), k = 2)
     groups <- extract_target_groups(meta_data_ML(), active_target_var())
     
     positions <- pcoa_coords
     positions$target <- groups
+    positions$sample_id <- meta_data_ML()$id
+    positions$tooltip <- paste0(
+      "<b>Sample: ", positions$sample_id, "</b><br/>",
+      "Group: ", positions$target, "<br/>",
+      "PCoA1: ", round(positions$pcoa1, 2), "<br/>",
+      "PCoA2: ", round(positions$pcoa2, 2)
+    )
+    positions$data_id <- positions$sample_id
     
-    
-    p1 <-positions %>%
-      ggplot (aes (x= pcoa1, y = pcoa2, color = target))+
-      geom_point()+
-      stat_ellipse()+
-      labs(color = "") +
+    p <- positions %>%
+      ggplot(aes(x = pcoa1, y = pcoa2, color = target, fill = target,
+                 tooltip = tooltip, data_id = data_id)) +
+      geom_point_interactive(size = 3, alpha = 0.7) +
+      stat_ellipse(alpha = 0.2) +
+      labs(
+        title = "Principal Coordinates Analysis (PCoA)",
+        x = "PCoA Axis 1",
+        y = "PCoA Axis 2",
+        color = ""
+      ) +
       theme_microarrai() +
       scale_color_microarrai() +
       scale_fill_microarrai()
     
-    
-    xdens <- 
-      axis_canvas(p1, axis = "x") + 
-      geom_density(data = positions, aes(x = pcoa1, fill = target, 
-                                         colour = target), alpha = 0.3) +
-      scale_color_microarrai() +
-      scale_fill_microarrai()
-    
-    ydens <-
-      axis_canvas(p1, axis = "y", coord_flip = TRUE) + 
-      geom_density(data = positions, aes(x = pcoa2, fill = target, 
-                                         colour = target), alpha = 0.3) +
-      coord_flip() +
-      scale_color_microarrai() +
-      scale_fill_microarrai()
-    
-    p1 %>%
-      insert_xaxis_grob(xdens, grid::unit(1, "in"), position = "top") %>%
-      insert_yaxis_grob(ydens, grid::unit(1, "in"), position = "right") %>%
-      ggdraw()
-    
+    apply_girafe(p, width_svg = 10, height_svg = 7)
   })
   
 
@@ -1850,7 +1874,7 @@ server <- function(input, output, session){
   output$PCoA_3d <- renderRglwidget({
     req(input$ml_use_pcoa)  # Only render if selected
     # Use modular PCoA 3D function
-    pcoa_coords <- perform_pcoa(dist.matrix(), k = 3)
+    pcoa_coords <- perform_pcoa(pcoa_dist_matrix(), k = 3)
     groups <- extract_target_groups(meta_data_ML(), active_target_var())
     
     create_3d_pcoa(
@@ -1865,22 +1889,32 @@ server <- function(input, output, session){
   
   
   ########################## PLOT NMDS ############################################
-  output$NMDS_2d <- renderPlot({
+  output$NMDS_2d <- renderGirafe({
     req(input$ml_use_nmds)  # Only render if selected
     # Use modular NMDS function
-    nmds_coords <- perform_nmds(dist.matrix(), k = 2)
+    nmds_coords <- perform_nmds(nmds_dist_matrix(), k = 2)
     groups <- extract_target_groups(meta_data_ML(), active_target_var())
     
     data <- nmds_coords
     data$target <- groups
+    data$sample_id <- meta_data_ML()$id
+    data$tooltip <- paste0(
+      "<b>Sample: ", data$sample_id, "</b><br/>",
+      "Group: ", data$target, "<br/>",
+      "NMDS1: ", round(data$NMDS1, 2), "<br/>",
+      "NMDS2: ", round(data$NMDS2, 2)
+    )
+    data$data_id <- data$sample_id
     
-    data %>% ggplot(aes(x= NMDS1, y= NMDS2, fill= target, color= target)) +
-      geom_point()+
+    p <- data %>% ggplot(aes(x= NMDS1, y= NMDS2, fill= target, color= target,
+                              tooltip = tooltip, data_id = data_id)) +
+      geom_point_interactive()+
       stat_ellipse()+
       theme_microarrai() +
       scale_color_microarrai() +
       scale_fill_microarrai()
     
+    apply_girafe(p, width_svg = 10, height_svg = 7)
   })
   
   
@@ -1900,7 +1934,7 @@ server <- function(input, output, session){
   output$NMDS_3d <- renderRglwidget({
     req(input$ml_use_nmds)  # Only render if selected
     # Use modular NMDS 3D function
-    nmds_coords <- perform_nmds(dist.matrix(), k = 3)
+    nmds_coords <- perform_nmds(nmds_dist_matrix(), k = 3)
     groups <- extract_target_groups(meta_data_ML(), active_target_var())
     
     create_3d_nmds(
@@ -1917,40 +1951,818 @@ server <- function(input, output, session){
     paste("Ellipsoid:", ellipsoid_NMDS(), "| Surface:", surface_NMDS())
   })
   
+  ########################## DBSCAN CLUSTERING ############################################
+  
+  output$dbscan_plot <- renderGirafe({
+    req(input$ml_use_dbscan)
+    
+    # Use PCA coordinates for clustering (first 2 components)
+    pca_coords <- PCA_mod()[, 1:2]
+    groups <- extract_target_groups(meta_data_ML(), active_target_var())
+    sample_ids <- meta_data_ML()$id
+    
+    # Perform DBSCAN clustering with user-defined parameters
+    eps_value <- if (!is.null(input$dbscan_eps)) input$dbscan_eps else 2.0
+    minpts_value <- if (!is.null(input$dbscan_minpts)) input$dbscan_minpts else 5
+    
+    db_result <- dbscan::dbscan(pca_coords, eps = eps_value, minPts = minpts_value)
+    
+    # Create plot data
+    plot_data <- data.frame(
+      PC1 = pca_coords[, 1],
+      PC2 = pca_coords[, 2],
+      Cluster = factor(db_result$cluster),
+      True_Group = groups,
+      Sample_ID = sample_ids
+    )
+    
+    # Cluster 0 = noise/outliers
+    plot_data$Cluster_Label <- ifelse(plot_data$Cluster == "0", "Noise", 
+                                       paste("Cluster", plot_data$Cluster))
+    
+    plot_data$tooltip <- paste0(
+      "<b>Sample: ", plot_data$Sample_ID, "</b><br/>",
+      "True Group: ", plot_data$True_Group, "<br/>",
+      "DBSCAN Cluster: ", plot_data$Cluster_Label, "<br/>",
+      "PC1: ", round(plot_data$PC1, 2), "<br/>",
+      "PC2: ", round(plot_data$PC2, 2)
+    )
+    plot_data$data_id <- plot_data$Sample_ID
+    
+    # Create color palette for true groups (not clusters)
+    n_groups <- length(unique(groups))
+    group_colors <- custom_palette[1:n_groups]
+    names(group_colors) <- unique(groups)
+    
+    # Create shape mapping for clusters
+    n_clusters <- max(db_result$cluster)
+    cluster_shapes <- if(n_clusters > 0) {
+      c(16, 17, 15, 18, 3, 4, 8)[1:(n_clusters + 1)]  # +1 for noise
+    } else {
+      c(16)
+    }
+    
+    # Plot: Color by True Group, Shape by DBSCAN Cluster
+    p <- ggplot(plot_data, aes(x = PC1, y = PC2, 
+                                color = True_Group, 
+                                shape = Cluster_Label,
+                                tooltip = tooltip, 
+                                data_id = data_id)) +
+      geom_point_interactive(size = 3.5, alpha = 0.8) +
+      scale_color_manual(values = group_colors) +
+      scale_shape_manual(values = cluster_shapes) +
+      labs(
+        title = "DBSCAN Clustering Results",
+        subtitle = paste("eps =", round(eps_value, 2), "| minPts =", minpts_value, 
+                        "| Clusters found:", max(db_result$cluster), 
+                        "| Noise points:", sum(db_result$cluster == 0)),
+        x = "PC1",
+        y = "PC2",
+        color = "True Group",
+        shape = "DBSCAN Cluster"
+      ) +
+      theme_microarrai() +
+      theme(legend.position = "right")
+    
+    # Add density contours for each DBSCAN cluster (except noise)
+    if(n_clusters > 0) {
+      cluster_data <- plot_data %>% filter(Cluster != "0")
+      if(nrow(cluster_data) > 0) {
+        p <- p + stat_density_2d(
+          data = cluster_data,
+          aes(x = PC1, y = PC2, group = Cluster_Label),
+          color = "gray30",
+          linewidth = 0.4,
+          alpha = 0.5,
+          bins = 4
+        )
+      }
+    }
+    
+    apply_girafe(p, width_svg = 11, height_svg = 7)
+  })
+  
+  output$dbscan_metrics <- renderUI({
+    req(input$ml_use_dbscan)
+    
+    # Use PCA coordinates for clustering
+    pca_coords <- PCA_mod()[, 1:2]
+    groups <- extract_target_groups(meta_data_ML(), active_target_var())
+    
+    # Perform DBSCAN
+    db_result <- dbscan::dbscan(pca_coords, eps = 0.5, minPts = 3)
+    
+    n_clusters <- max(db_result$cluster)
+    n_noise <- sum(db_result$cluster == 0)
+    n_samples <- nrow(pca_coords)
+    
+    # Calculate silhouette score if we have clusters
+    sil_score <- NA
+    if (n_clusters > 0 && n_clusters < n_samples - 1) {
+      # Remove noise points for silhouette calculation
+      non_noise_idx <- db_result$cluster != 0
+      if (sum(non_noise_idx) > 1) {
+        sil <- cluster::silhouette(db_result$cluster[non_noise_idx], 
+                                   dist(pca_coords[non_noise_idx, ]))
+        sil_score <- round(mean(sil[, 3]), 3)
+      }
+    }
+    
+    tagList(
+      tags$div(
+        style = "background: #f5f5f5; padding: 15px; border-radius: 8px;",
+        tags$h6("Clustering Summary", style = "color: #191c32; font-weight: 600; margin-bottom: 15px;"),
+        tags$table(
+          style = "width: 100%; border-collapse: collapse;",
+          tags$tr(
+            tags$td(strong("Number of Clusters:"), style = "padding: 8px 0;"),
+            tags$td(n_clusters, style = "padding: 8px 0; text-align: right; color: #667eea; font-weight: 600;")
+          ),
+          tags$tr(
+            tags$td(strong("Noise Points:"), style = "padding: 8px 0;"),
+            tags$td(paste0(n_noise, " (", round(n_noise/n_samples*100, 1), "%)"), 
+                   style = "padding: 8px 0; text-align: right;")
+          ),
+          tags$tr(
+            tags$td(strong("Clustered Points:"), style = "padding: 8px 0;"),
+            tags$td(paste0(n_samples - n_noise, " (", round((n_samples-n_noise)/n_samples*100, 1), "%)"), 
+                   style = "padding: 8px 0; text-align: right;")
+          ),
+          tags$tr(
+            tags$td(strong("Silhouette Score:"), style = "padding: 8px 0;"),
+            tags$td(ifelse(is.na(sil_score), "N/A", sil_score), 
+                   style = "padding: 8px 0; text-align: right;")
+          )
+        )
+      ),
+      tags$br(),
+      tags$div(
+        style = "background: #e3f2fd; padding: 12px; border-radius: 4px; border-left: 4px solid #2196F3;",
+        tags$small(
+          style = "color: #0d47a1;",
+          icon("info-circle", style = "margin-right: 5px;"),
+          strong("Note: "),
+          "DBSCAN clusters are found based on density. Points marked as 'Noise' don't belong to any dense region."
+        )
+      )
+    )
+  })
+  
+  ########################## PLS-DA ANALYSIS ############################################
+  
+  output$plsda_score_plot <- renderGirafe({
+    req(input$ml_use_plsda)
+    
+    # Prepare data
+    X <- meta_data_ML() %>% 
+      dplyr::select(1:ncol(active_pepdata())) %>% 
+      dplyr::select(-id) %>%
+      select_if(is.numeric)
+    
+    Y <- extract_target_groups(meta_data_ML(), active_target_var())
+    sample_ids <- meta_data_ML()$id
+    
+    # Remove NA and ensure proper format
+    X[is.na(X)] <- 0
+    X <- as.matrix(X)
+    Y <- as.factor(Y)
+    
+    # Perform PLS-DA
+    plsda_result <- mixOmics::plsda(X, Y, ncomp = 2)
+    
+    # Extract scores
+    scores <- as.data.frame(plsda_result$variates$X)
+    scores$Group <- Y
+    scores$Sample_ID <- sample_ids
+    scores$tooltip <- paste0(
+      "<b>Sample: ", scores$Sample_ID, "</b><br/>",
+      "Group: ", scores$Group, "<br/>",
+      "Comp1: ", round(scores$comp1, 2), "<br/>",
+      "Comp2: ", round(scores$comp2, 2)
+    )
+    scores$data_id <- scores$Sample_ID
+    
+    # Calculate variance explained
+    var_exp <- plsda_result$prop_expl_var$X
+    
+    p <- ggplot(scores, aes(x = comp1, y = comp2, color = Group, fill = Group,
+                             tooltip = tooltip, data_id = data_id)) +
+      geom_point_interactive(size = 3, alpha = 0.7) +
+      stat_ellipse(level = 0.95, alpha = 0.2) +
+      scale_color_manual(values = custom_palette) +
+      scale_fill_manual(values = custom_palette) +
+      labs(
+        title = "PLS-DA Score Plot",
+        x = paste0("Component 1 (", round(var_exp[1] * 100, 1), "%)"),
+        y = paste0("Component 2 (", round(var_exp[2] * 100, 1), "%)")
+      ) +
+      theme_microarrai() +
+      theme(legend.position = "right")
+    
+    apply_girafe(p, width_svg = 10, height_svg = 7)
+  })
+  
+  output$plsda_metrics <- renderUI({
+    req(input$ml_use_plsda)
+    
+    # Prepare data
+    X <- meta_data_ML() %>% 
+      dplyr::select(1:ncol(active_pepdata())) %>% 
+      dplyr::select(-id) %>%
+      select_if(is.numeric)
+    
+    Y <- extract_target_groups(meta_data_ML(), active_target_var())
+    
+    # Remove NA
+    X[is.na(X)] <- 0
+    X <- as.matrix(X)
+    Y <- as.factor(Y)
+    
+    # Perform PLS-DA with cross-validation
+    plsda_result <- mixOmics::plsda(X, Y, ncomp = 2)
+    
+    # Perform cross-validation
+    set.seed(123)
+    plsda_perf <- mixOmics::perf(plsda_result, validation = "Mfold", 
+                                 folds = 5, nrepeat = 10)
+    
+    # Get error rates - usar max.dist o BER según disponibilidad
+    error_rate_matrix <- plsda_perf$error.rate$overall
+    if("max.dist" %in% colnames(error_rate_matrix)) {
+      error_rate <- error_rate_matrix["comp2", "max.dist"]
+    } else if("BER" %in% colnames(error_rate_matrix)) {
+      error_rate <- error_rate_matrix["comp2", "BER"]
+    } else {
+      error_rate <- error_rate_matrix["comp2", 1]
+    }
+    
+    tagList(
+      tags$div(
+        style = "background: #f5f5f5; padding: 15px; border-radius: 8px;",
+        tags$h6("Model Performance (5-Fold CV)", style = "color: #191c32; font-weight: 600; margin-bottom: 15px;"),
+        tags$table(
+          style = "width: 100%; border-collapse: collapse;",
+          tags$tr(
+            tags$td(strong("Classification Error:"), style = "padding: 8px 0;"),
+            tags$td(paste0(round(error_rate * 100, 1), "%"), 
+                   style = "padding: 8px 0; text-align: right; color: #667eea; font-weight: 600;")
+          ),
+          tags$tr(
+            tags$td(strong("Accuracy:"), style = "padding: 8px 0;"),
+            tags$td(paste0(round((1 - error_rate) * 100, 1), "%"), 
+                   style = "padding: 8px 0; text-align: right; color: #4caf50; font-weight: 600;")
+          ),
+          tags$tr(
+            tags$td(strong("Number of Components:"), style = "padding: 8px 0;"),
+            tags$td("2", style = "padding: 8px 0; text-align: right;")
+          ),
+          tags$tr(
+            tags$td(strong("Number of Variables:"), style = "padding: 8px 0;"),
+            tags$td(ncol(X), style = "padding: 8px 0; text-align: right;")
+          )
+        )
+      )
+    )
+  })
+  
+  output$plsda_vip_plot <- renderPlot({
+    req(input$ml_use_plsda)
+    
+    # Prepare data
+    X <- meta_data_ML() %>% 
+      dplyr::select(1:ncol(active_pepdata())) %>% 
+      dplyr::select(-id) %>%
+      select_if(is.numeric)
+    
+    Y <- extract_target_groups(meta_data_ML(), active_target_var())
+    
+    # Remove NA
+    X[is.na(X)] <- 0
+    X <- as.matrix(X)
+    Y <- as.factor(Y)
+    
+    # Perform PLS-DA
+    plsda_result <- mixOmics::plsda(X, Y, ncomp = 2)
+    
+    # Calculate VIP scores
+    vip_scores <- mixOmics::vip(plsda_result)
+    
+    # Get top 15 variables
+    vip_df <- data.frame(
+      Variable = rownames(vip_scores),
+      VIP = vip_scores[, 1]
+    ) %>%
+      arrange(desc(VIP)) %>%
+      slice_head(n = 15)
+    
+    # Plot
+    ggplot(vip_df, aes(x = reorder(Variable, VIP), y = VIP)) +
+      geom_bar(stat = "identity", fill = "#667eea", alpha = 0.8) +
+      geom_hline(yintercept = 1, linetype = "dashed", color = "red", size = 1) +
+      coord_flip() +
+      labs(
+        title = "Top 15 Variables by VIP Score",
+        subtitle = "Variables with VIP > 1 are considered important",
+        x = "Variable",
+        y = "VIP Score"
+      ) +
+      theme_microarrai() +
+      theme(axis.text.y = element_text(size = 9))
+  })
+  
   ####### Supervised machine learning ####
   
   ML.db <- reactive({
+    req(meta_data_ML(), active_target_var())
+    
     # Use modular ML data preparation function
-    prepare_ml_data(
+    result <- prepare_ml_data(
       data = meta_data_ML(),
       group_var = active_target_var(),
       id_column = "id"
     )
+    
+    message("ML.db prepared with ", nrow(result), " samples and ", ncol(result), " features")
+    result
   })
   
+  # ===== ADVANCED TRAINING REACTIVES (OPTIONAL) =====
   
+  # C5.0 Advanced Training (only runs when pipeline button is clicked)
+  c50_advanced_result <- eventReactive(input$ml_run_pipeline, {
+    req(input$ml_use_c50, ML.db())
+    
+    # Valores por defecto si no existen los inputs
+    use_rfe <- if(!is.null(input$ml_use_rfe)) input$ml_use_rfe else FALSE
+    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else TRUE
+    tune_params <- if(!is.null(input$ml_use_tuning)) input$ml_use_tuning else FALSE
+    
+    message("Starting C5.0 training: RFE=", use_rfe, " CV=", use_cv, " Tuning=", tune_params)
+    
+    withProgress(message = 'Training C5.0...', value = 0, {
+      incProgress(0.3, detail = "Preparing data...")
+      
+      result <- train_model_advanced(
+        data = ML.db(),
+        model_type = "c50",
+        use_rfe = use_rfe,
+        use_cv = use_cv,
+        cv_folds = 3,  # Reduced to 3 for faster testing
+        cv_repeats = 1,  # Reduced to 1 for faster testing
+        tune_params = tune_params
+      )
+      
+      message("C5.0 training complete. Accuracy: ", round(result$metrics$accuracy, 3))
+      incProgress(1, detail = "Complete!")
+      result
+    })
+  })
+  
+  # Random Forest Advanced Training (only runs when pipeline button is clicked)
+  rf_advanced_result <- eventReactive(input$ml_run_pipeline, {
+    req(input$ml_use_rf, ML.db())
+    
+    # Valores por defecto si no existen los inputs
+    use_rfe <- if(!is.null(input$ml_use_rfe)) input$ml_use_rfe else FALSE
+    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else TRUE
+    tune_params <- if(!is.null(input$ml_use_tuning)) input$ml_use_tuning else FALSE
+    
+    message("Starting RF training: RFE=", use_rfe, " CV=", use_cv, " Tuning=", tune_params)
+    
+    withProgress(message = 'Training Random Forest...', value = 0, {
+      incProgress(0.3, detail = "Preparing data...")
+      
+      result <- train_model_advanced(
+        data = ML.db(),
+        model_type = "rf",
+        use_rfe = use_rfe,
+        use_cv = use_cv,
+        cv_folds = 3,  # Reduced to 3 for faster testing
+        cv_repeats = 1,  # Reduced to 1 for faster testing
+        tune_params = tune_params
+      )
+      
+      message("RF training complete. Accuracy: ", round(result$metrics$accuracy, 3))
+      incProgress(1, detail = "Complete!")
+      result
+    })
+  })
+  
+  # SVM Advanced Training (only runs when pipeline button is clicked)
+  svm_advanced_result <- eventReactive(input$ml_run_pipeline, {
+    req(input$ml_use_svm, ML.db())
+    
+    # Valores por defecto si no existen los inputs
+    use_rfe <- if(!is.null(input$ml_use_rfe)) input$ml_use_rfe else FALSE
+    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else TRUE
+    tune_params <- if(!is.null(input$ml_use_tuning)) input$ml_use_tuning else FALSE
+    
+    message("Starting SVM training: RFE=", use_rfe, " CV=", use_cv, " Tuning=", tune_params)
+    
+    withProgress(message = 'Training SVM...', value = 0, {
+      incProgress(0.3, detail = "Preparing data...")
+      
+      result <- train_model_advanced(
+        data = ML.db(),
+        model_type = "svm",
+        use_rfe = use_rfe,
+        use_cv = use_cv,
+        cv_folds = 3,  # Reduced to 3 for faster testing
+        cv_repeats = 1,  # Reduced to 1 for faster testing
+        tune_params = tune_params
+      )
+      
+      message("SVM training complete. Accuracy: ", round(result$metrics$accuracy, 3))
+      incProgress(1, detail = "Complete!")
+      result
+    })
+  })
+  
+  # XGBoost Advanced Training (only runs when pipeline button is clicked)
+  xgboost_advanced_result <- eventReactive(input$ml_run_pipeline, {
+    req(input$ml_use_xgboost, ML.db())
+    
+    # Valores por defecto si no existen los inputs
+    use_rfe <- if(!is.null(input$ml_use_rfe)) input$ml_use_rfe else FALSE
+    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else TRUE
+    tune_params <- if(!is.null(input$ml_use_tuning)) input$ml_use_tuning else FALSE
+    
+    message("Starting XGBoost training: RFE=", use_rfe, " CV=", use_cv, " Tuning=", tune_params)
+    
+    withProgress(message = 'Training XGBoost...', value = 0, {
+      incProgress(0.3, detail = "Preparing data...")
+      
+      result <- train_model_advanced(
+        data = ML.db(),
+        model_type = "xgboost",
+        use_rfe = use_rfe,
+        use_cv = use_cv,
+        cv_folds = 3,  # Reduced to 3 for faster testing
+        cv_repeats = 1,  # Reduced to 1 for faster testing
+        tune_params = tune_params
+      )
+      
+      message("XGBoost training complete. Accuracy: ", round(result$metrics$accuracy, 3))
+      incProgress(1, detail = "Complete!")
+      result
+    })
+  })
+  
+  # ===== DYNAMIC PANEL OUTPUTS =====
+  
+  # C5.0 Panel
+  output$c50_panel_content <- renderUI({
+    req(input$ml_use_c50)
+    
+    result <- tryCatch(c50_advanced_result(), error = function(e) NULL)
+    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else FALSE
+    
+    card_container(
+      style = "margin: 0 15px; padding: 25px;",
+      
+      # Model header
+      tags$div(
+        style = "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);",
+        tags$h4(
+          style = "color: white; margin: 0 0 10px 0; font-weight: 600;",
+          icon("tree", style = "margin-right: 10px;"),
+          "C5.0 Decision Tree"
+        ),
+        tags$p(
+          style = "color: rgba(255,255,255,0.95); margin: 0; font-size: 14px; line-height: 1.6;",
+          "Builds interpretable decision trees using information gain ratio. Supports boosting with multiple trials to improve accuracy. Automatically handles missing values and provides variable importance scores."
+        )
+      ),
+      
+      tags$hr(style = "margin: 20px 0; border-color: #ddd;"),
+      
+      # Two-column layout
+      fluidRow(
+        # Left column: Histogram
+        column(7,
+          tags$h5("Feature Importance", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+          shinycssloaders::withSpinner(plotOutput("c5.plot", height = "450px"))
+        ),
+        # Right column: Slider + Params + Metrics
+        column(5,
+          # Slider with disclaimer
+          tags$div(
+            style = "background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px;",
+            tags$h6("Display Options", style = "color: #191c32; margin-bottom: 10px; font-weight: 600;"),
+            sliderInput("c50_top_n", "Number of features:", 
+                       min = 5, max = 30, value = 15, step = 1),
+            tags$p(
+              style = "font-size: 11px; color: #666; line-height: 1.4; margin: 10px 0 0 0;",
+              icon("info-circle", style = "color: #667eea; margin-right: 5px;"),
+              "Ranked by usage frequency and accuracy contribution."
+            )
+          ),
+          # Model parameters
+          tags$div(
+            style = "background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; margin-bottom: 15px;",
+            tags$div(
+              style = "font-size: 13px; color: #191c32; font-weight: 500;",
+              icon("cog", style = "color: #667eea; margin-right: 8px;"),
+              if(!is.null(result)) {
+                n_features <- if(!is.null(result$varimp)) nrow(result$varimp$importance) else 0
+                cv_info <- if(use_cv) "3-Fold CV" else "No CV"
+                paste0("C5.0 + ", cv_info, " | ", n_features, " features")
+              } else {
+                "C5.0 Model"
+              }
+            )
+          ),
+          # Performance metrics - Radar plot
+          if(use_cv && !is.null(result)) {
+            tags$div(
+              style = "background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 0;",
+              girafeOutput("c50_radar", height = "280px")
+            )
+          }
+        )
+      )
+    )
+  })
+  
+  # Random Forest Panel
+  output$rf_panel_content <- renderUI({
+    req(input$ml_use_rf)
+    
+    result <- tryCatch(rf_advanced_result(), error = function(e) NULL)
+    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else FALSE
+    
+    card_container(
+      style = "margin: 0 15px; padding: 25px;",
+      
+      # Model header
+      tags$div(
+        style = "background: linear-gradient(135deg, #34a853 0%, #0f9d58 100%); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(52, 168, 83, 0.3);",
+        tags$h4(
+          style = "color: white; margin: 0 0 10px 0; font-weight: 600;",
+          icon("tree", style = "margin-right: 10px;"),
+          "Random Forest"
+        ),
+        tags$p(
+          style = "color: rgba(255,255,255,0.95); margin: 0; font-size: 14px; line-height: 1.6;",
+          "Ensemble learning method that builds multiple decision trees on bootstrap samples and aggregates their predictions. Highly robust against overfitting and effective for high-dimensional data. Importance calculated using Mean Decrease in Gini impurity."
+        )
+      ),
+      
+      tags$hr(style = "margin: 20px 0; border-color: #ddd;"),
+      
+      # Two-column layout
+      fluidRow(
+        # Left column: Histogram
+        column(7,
+          tags$h5("Feature Importance (Gini)", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+          shinycssloaders::withSpinner(plotOutput("rf.plot", height = "450px"))
+        ),
+        # Right column: Slider + Params + Metrics
+        column(5,
+          # Slider with disclaimer
+          tags$div(
+            style = "background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px;",
+            tags$h6("Display Options", style = "color: #191c32; margin-bottom: 10px; font-weight: 600;"),
+            sliderInput("rf_top_n", "Number of features:", 
+                       min = 5, max = 30, value = 15, step = 1),
+            tags$p(
+              style = "font-size: 11px; color: #666; line-height: 1.4; margin: 10px 0 0 0;",
+              icon("info-circle", style = "color: #34a853; margin-right: 5px;"),
+              "Ranked by Mean Decrease in Gini impurity."
+            )
+          ),
+          # Model parameters
+          tags$div(
+            style = "background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; margin-bottom: 15px;",
+            tags$div(
+              style = "font-size: 13px; color: #191c32; font-weight: 500;",
+              icon("cog", style = "color: #34a853; margin-right: 8px;"),
+              if(!is.null(result)) {
+                n_features <- if(!is.null(result$varimp)) nrow(result$varimp$importance) else 0
+                cv_info <- if(use_cv) "3-Fold CV" else "No CV"
+                paste0("RF + ", cv_info, " | ", n_features, " features")
+              } else {
+                "Random Forest Model"
+              }
+            )
+          ),
+          # Performance metrics - Radar plot
+          if(use_cv && !is.null(result)) {
+            tags$div(
+              style = "background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 0;",
+              girafeOutput("rf_radar", height = "280px")
+            )
+          }
+        )
+      )
+    )
+  })
+  
+  # SVM Panel
+  output$svm_panel_content <- renderUI({
+    req(input$ml_use_svm)
+    
+    result <- tryCatch(svm_advanced_result(), error = function(e) NULL)
+    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else FALSE
+    use_rfe <- if(!is.null(input$ml_use_rfe)) input$ml_use_rfe else FALSE
+    
+    card_container(
+      style = "margin: 0 15px; padding: 25px;",
+      
+      # Model header
+      tags$div(
+        style = "background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);",
+        tags$h4(
+          style = "color: white; margin: 0 0 10px 0; font-weight: 600;",
+          icon("vector-square", style = "margin-right: 10px;"),
+          "Support Vector Machine (SVM)"
+        ),
+        tags$p(
+          style = "color: rgba(255,255,255,0.95); margin: 0; font-size: 14px; line-height: 1.6;",
+          "Finds the optimal hyperplane that maximizes the margin between classes. Linear kernel used with cost parameter C=10. Features selected using Recursive Feature Elimination (RFE) with cross-validation."
+        )
+      ),
+      
+      tags$hr(style = "margin: 20px 0; border-color: #ddd;"),
+      
+      # Two-column layout
+      fluidRow(
+        # Left column: Feature list
+        column(7,
+          tags$h5("Selected Features (RFE)", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+          uiOutput("svm_features_list")
+        ),
+        # Right column: Params + Metrics
+        column(5,
+          # Model parameters
+          tags$div(
+            style = "background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; margin-bottom: 15px;",
+            tags$div(
+              style = "font-size: 13px; color: #191c32; font-weight: 500;",
+              icon("cog", style = "color: #ff6b6b; margin-right: 8px;"),
+              if(!is.null(result)) {
+                n_features <- if(!is.null(result$selected_features)) length(result$selected_features) else 0
+                cv_info <- if(use_cv) "3-Fold CV" else "No CV"
+                rfe_info <- if(use_rfe) " + RFE" else ""
+                paste0("SVM + ", cv_info, rfe_info, " | ", n_features, " features")
+              } else {
+                "SVM Model"
+              }
+            )
+          ),
+          # Performance metrics - Radar plot
+          if(use_cv && !is.null(result)) {
+            tags$div(
+              style = "background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 0;",
+              girafeOutput("svm_radar", height = "280px")
+            )
+          }
+        )
+      )
+    )
+  })
+  
+  # XGBoost Panel
+  output$xgboost_panel_content <- renderUI({
+    req(input$ml_use_xgboost)
+    
+    result <- tryCatch(xgboost_advanced_result(), error = function(e) NULL)
+    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else FALSE
+    
+    card_container(
+      style = "margin: 0 15px; padding: 25px;",
+      
+      # Model header
+      tags$div(
+        style = "background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(243, 156, 18, 0.3);",
+        tags$h4(
+          style = "color: white; margin: 0 0 10px 0; font-weight: 600;",
+          icon("bolt", style = "margin-right: 10px;"),
+          "XGBoost (Extreme Gradient Boosting)"
+        ),
+        tags$p(
+          style = "color: rgba(255,255,255,0.95); margin: 0; font-size: 14px; line-height: 1.6;",
+          "Scalable gradient boosting algorithm that builds sequential trees to correct errors from previous iterations. Highly efficient for large datasets with complex feature interactions. SHAP (SHapley Additive exPlanations) values provide model interpretability."
+        )
+      ),
+      
+      tags$hr(style = "margin: 20px 0; border-color: #ddd;"),
+      
+      # Two-column layout
+      fluidRow(
+        # Left column: Importance plot (SHAP or VarImp)
+        column(7,
+          uiOutput("xgb_plot_title"),
+          shinycssloaders::withSpinner(plotOutput("xgb_importance_plot", height = "450px"))
+        ),
+        # Right column: Toggle + Slider + Params + Metrics
+        column(5,
+          # Toggle SHAP/VarImp
+          tags$div(
+            style = "background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px;",
+            tags$h6("Importance Type", style = "color: #191c32; margin-bottom: 10px; font-weight: 600;"),
+            radioButtons("xgb_importance_type", NULL,
+                        choices = c("SHAP Values" = "shap", "Variable Importance" = "varimp"),
+                        selected = "varimp", inline = TRUE),
+            tags$p(
+              style = "font-size: 11px; color: #666; line-height: 1.4; margin: 10px 0 0 0;",
+              icon("info-circle", style = "color: #f39c12; margin-right: 5px;"),
+              textOutput("xgb_importance_help", inline = TRUE)
+            )
+          ),
+          # Slider (only for VarImp)
+          conditionalPanel(
+            condition = "input.xgb_importance_type == 'varimp'",
+            tags$div(
+              style = "background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px;",
+              sliderInput("xgb_top_n", "Number of features:", 
+                         min = 5, max = 30, value = 15, step = 1)
+            )
+          ),
+          # Model parameters
+          tags$div(
+            style = "background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; margin-bottom: 15px;",
+            tags$div(
+              style = "font-size: 13px; color: #191c32; font-weight: 500;",
+              icon("cog", style = "color: #f39c12; margin-right: 8px;"),
+              if(!is.null(result)) {
+                n_features <- if(!is.null(result$varimp)) nrow(result$varimp$importance) else 0
+                cv_info <- if(use_cv) "3-Fold CV" else "No CV"
+                paste0("XGBoost + ", cv_info, " | ", n_features, " features")
+              } else {
+                "XGBoost Model"
+              }
+            )
+          ),
+          # Performance metrics - Radar plot
+          if(use_cv && !is.null(result)) {
+            tags$div(
+              style = "background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 0;",
+              girafeOutput("xgb_radar", height = "280px")
+            )
+          }
+        )
+      )
+    )
+  })
   
   ## Modelo C5.0 ##
+  
+  # C5.0 Variable Importance Features (unified caret approach)
   variables_c5 <- reactive({
-    req(input$ml_use_c50)  # Only compute if selected
-    # Use modular C5.0 functions
-    model <- train_c50_model(ML.db(), trials = 50, seed = 120)
-    extract_c50_importance(model, top_n = 30)
+    req(input$ml_use_c50)
+    
+    # Get result from advanced training (uses caret::varImp)
+    result <- tryCatch({
+      c50_advanced_result()
+    }, error = function(e) {
+      message("[variables_c5] Advanced result not available: ", e$message)
+      NULL
+    })
+    
+    # Return features from varimp (NOT selected_features which is for RFE)
+    if (!is.null(result) && !is.null(result$varimp)) {
+      # Use unified format function
+      importance_df <- format_varimp_df(result$varimp, top_n = 30)
+      if (!is.null(importance_df) && nrow(importance_df) > 0) {
+        return(importance_df$Feature)
+      }
+    }
+    
+    # Fallback: empty vector
+    message("[variables_c5] No variable importance available")
+    return(character(0))
   })
   
+  # C5.0 Feature Importance Plot (uses c50_advanced_result reactive)
   output$c5.plot <- renderPlot({
-    req(input$ml_use_c50)  # Only render if selected
-    # Use modular C5.0 functions
-    model <- train_c50_model(ML.db(), trials = 50, seed = 120)
+    req(input$ml_use_c50)
     
-    # Extract and plot importance
-    as.data.frame(C50::C5imp(model)) %>%
-      dplyr::slice_head(n = 15) %>% 
-      rownames_to_column(var = "Var") %>% 
-      ggplot(aes(x = Var, y= Overall)) +
-      geom_bar(stat = "identity", fill = "steelblue") +
+    top_n <- if(!is.null(input$c50_top_n)) input$c50_top_n else 15
+    result <- tryCatch(c50_advanced_result(), error = function(e) NULL)
+    
+    if (is.null(result) || is.null(result$varimp)) {
+      return(ggplot() + 
+        annotate("text", x = 0, y = 0, label = "Variable importance not available") +
+        theme_void())
+    }
+    
+    importance_df <- format_varimp_df(result$varimp, top_n = top_n)
+    
+    if (is.null(importance_df) || nrow(importance_df) == 0) {
+      return(ggplot() + 
+        annotate("text", x = 0, y = 0, label = "No features available") +
+        theme_void())
+    }
+    
+    # Simple ggplot
+    ggplot(importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+      geom_col(fill = "#667eea", alpha = 0.8) +
       coord_flip() +
-      theme_microarrai() 
+      labs(title = paste("Top", top_n, "Most Important Features"),
+           x = NULL, y = "Relative Importance") +
+      theme_minimal() +
+      theme(axis.text = element_text(size = 10))
   })
   
   output$c5.tree <- renderPlot({
@@ -1960,103 +2772,176 @@ server <- function(input, output, session){
     plot(model)
   })
   
-  
-  output$c5.decision <- renderPlot({
-    req(input$ml_use_c50)  # Only render if selected
-    # Use modular decision boundary function
-    c5_vars <- variables_c5()
-    create_decision_boundary_plot(
-      data = ML.db(), 
-      model_type = "c50", 
-      important_vars = c5_vars,
-      trials = 100
-    ) +
-      theme_microarrai() +
-      scale_color_microarrai() +
-      scale_fill_microarrai()
-  })
-  ## Random Forest ## 
-  variables_rf <- reactive({
-    req(input$ml_use_rf)  # Only compute if selected
-    # Use modular Random Forest functions
-    model <- train_randomforest_model(ML.db())
-    extract_rf_importance(model, top_n = 30)
-  })
-  
-  output$rf.plot <- renderPlot({
-    req(input$ml_use_rf)  # Only render if selected
-    # Use modular Random Forest functions
-    model <- train_randomforest_model(ML.db())
+  # C5.0 Radar Plot for Performance Metrics
+  output$c50_radar <- renderGirafe({
+    req(input$ml_use_c50)
+    result <- tryCatch(c50_advanced_result(), error = function(e) NULL)
     
-    caret::varImp(model) %>% 
-      as.data.frame() %>% 
-      arrange(desc(Overall)) %>% 
-      dplyr::slice_head(n = 15) %>% 
-      rownames_to_column(var = "Var") %>% 
-      ggplot(aes(x = Var, y= Overall)) +
-      geom_bar(stat = "identity", fill = "steelblue") +
-      coord_flip() +
-      labs(title = "Feature Selection by Random Forest") +
-      theme_microarrai()
+    if(is.null(result)) {
+      return(NULL)
+    }
+    
+    create_performance_radar(result, model_color = "#667eea")
   })
   
-  output$rf.decision <- renderPlot({
-    req(input$ml_use_rf)  # Only render if selected
-    # Use modular decision boundary function
-    rf_vars <- variables_rf()
-    create_decision_boundary_plot(
-      data = ML.db(), 
-      model_type = "rf", 
-      important_vars = rf_vars
-    ) +
-      theme_microarrai() +
-      scale_color_microarrai() +
-      scale_fill_microarrai()
-  })
+  # C5.0 decision boundary removed - not compatible with ggiraph interactivity
   
+  ## Random Forest ##
   
-  ## SVM ##
-  
-  variables_importantes_reactive <- reactive({
-    req(input$ml_use_svm)  # Only compute if selected
-    # Use modular RFE function
-    df_scaled <- scale_ml_data(ML.db())
-    perform_rfe_svm(df_scaled, sizes = c(1:10), cv_folds = 2)
-  })
-  
-  ## SVM ##
-  
-  output$svm.plot <- renderPlot({
-    req(input$ml_use_svm)  # Only render if selected
-    withProgress(message = 'Running RFE', value = 0, {
-      # Use modular scaling and decision boundary functions
-      df.scaled <- scale_ml_data(ML.db())
-      
-      incProgress(0.6, detail = "RFE completed, selecting important variables...")
-      
-      svm_vars <- variables_importantes_reactive()
-      
-      incProgress(0.8, detail = "Creating decision boundary plot...")
-      
-      plot <- create_decision_boundary_plot(
-        data = df.scaled, 
-        model_type = "svm", 
-        important_vars = svm_vars,
-        cost = 10
-      ) +
-        theme_microarrai() +
-        scale_color_microarrai() +
-        scale_fill_microarrai()
-      
-      incProgress(1, detail = "Completado")
-      
-      plot
+  # Random Forest Variable Importance Features (unified caret approach)
+  variables_rf <- reactive({
+    req(input$ml_use_rf)
+    
+    # Get result from advanced training (uses caret::varImp)
+    result <- tryCatch({
+      rf_advanced_result()
+    }, error = function(e) {
+      message("[variables_rf] Advanced result not available: ", e$message)
+      NULL
     })
+    
+    # Return features from varimp (NOT selected_features which is for RFE)
+    if (!is.null(result) && !is.null(result$varimp)) {
+      # Use unified format function
+      importance_df <- format_varimp_df(result$varimp, top_n = 30)
+      if (!is.null(importance_df) && nrow(importance_df) > 0) {
+        return(importance_df$Feature)
+      }
+    }
+    
+    # Fallback: empty vector
+    message("[variables_rf] No variable importance available")
+    return(character(0))
   })
   
-  ## Visualización 3D ##
-  output$svm3d.plot <- renderPlotly({
-    req(input$ml_use_svm)  # Only render if selected
+  # RF Feature Importance Plot (uses rf_advanced_result reactive)
+  output$rf.plot <- renderPlot({
+    req(input$ml_use_rf)
+    
+    top_n <- if(!is.null(input$rf_top_n)) input$rf_top_n else 15
+    result <- tryCatch(rf_advanced_result(), error = function(e) NULL)
+    
+    if (is.null(result) || is.null(result$varimp)) {
+      return(ggplot() + 
+        annotate("text", x = 0, y = 0, label = "Variable importance not available") +
+        theme_void())
+    }
+    
+    importance_df <- format_varimp_df(result$varimp, top_n = top_n)
+    
+    if (is.null(importance_df) || nrow(importance_df) == 0) {
+      return(ggplot() + 
+        annotate("text", x = 0, y = 0, label = "No features available") +
+        theme_void())
+    }
+    
+    # Simple ggplot
+    ggplot(importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+      geom_col(fill = "#34a853", alpha = 0.8) +
+      coord_flip() +
+      labs(title = paste("Top", top_n, "Most Important Features"),
+           x = NULL, y = "Relative Importance (Gini)") +
+      theme_minimal() +
+      theme(axis.text = element_text(size = 10))
+  })
+  
+  # RF Radar Plot for Performance Metrics
+  output$rf_radar <- renderGirafe({
+    req(input$ml_use_rf)
+    result <- tryCatch(rf_advanced_result(), error = function(e) NULL)
+    
+    if(is.null(result)) {
+      return(NULL)
+    }
+    
+    create_performance_radar(result, model_color = "#34a853")
+  })
+  
+  ## SVM ##
+  
+  # SVM Variable Importance Features (unified caret approach)
+  variables_importantes_reactive <- reactive({
+    req(input$ml_use_svm)
+    
+    # Get result from advanced training (uses caret::varImp)
+    result <- tryCatch({
+      svm_advanced_result()
+    }, error = function(e) {
+      message("[variables_svm] Advanced result not available: ", e$message)
+      NULL
+    })
+    
+    # Return features from varimp (NOT selected_features which is for RFE)
+    if (!is.null(result) && !is.null(result$varimp)) {
+      # Use unified format function
+      importance_df <- format_varimp_df(result$varimp, top_n = 30)
+      if (!is.null(importance_df) && nrow(importance_df) > 0) {
+        return(importance_df$Feature)
+      }
+    }
+    
+    # Fallback: empty vector
+    message("[variables_svm] No variable importance available")
+    return(character(0))
+  })
+  
+  # SVM Features List UI
+  output$svm_features_list <- renderUI({
+    req(input$ml_use_svm)
+    
+    features <- variables_importantes_reactive()
+    
+    if(length(features) == 0) {
+      return(tags$p("No features available", style = "color: #666; font-style: italic;"))
+    }
+    
+    tags$div(
+      style = "background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; max-height: 400px; overflow-y: auto;",
+      lapply(seq_along(features), function(i) {
+        tags$div(
+          style = "padding: 8px; margin-bottom: 5px; background: #f8f9fa; border-radius: 4px; border-left: 3px solid #ff6b6b;",
+          tags$strong(paste0(i, ". "), style = "color: #ff6b6b; margin-right: 8px; font-size: 12px;"),
+          tags$span(features[i], style = "color: #191c32; font-size: 12px;")
+        )
+      })
+    )
+  })
+  
+  # SVM Radar Plot for Performance Metrics
+  output$svm_radar <- renderGirafe({
+    req(input$ml_use_svm)
+    result <- tryCatch(svm_advanced_result(), error = function(e) NULL)
+    
+    if(is.null(result)) {
+      return(NULL)
+    }
+    
+    create_performance_radar(result, model_color = "#ff6b6b")
+  })
+  
+  # SVM decision boundary plot removed - replaced with feature list
+  
+  ## XGBoost ##
+  # XGBoost plot title
+  output$xgb_plot_title <- renderUI({
+    req(input$ml_use_xgboost)
+    plot_type <- if(!is.null(input$xgb_importance_type)) input$xgb_importance_type else "varimp"
+    title <- if(plot_type == "shap") "SHAP Feature Importance" else "Variable Importance (Gain)"
+    tags$h5(title, style = "color: #191c32; margin-bottom: 15px; font-weight: 600;")
+  })
+  
+  # XGBoost help text
+  output$xgb_importance_help <- renderText({
+    plot_type <- if(!is.null(input$xgb_importance_type)) input$xgb_importance_type else "varimp"
+    if(plot_type == "shap") {
+      "SHAP values show game-theoretic feature contributions to predictions."
+    } else {
+      "Gain measures total improvement in loss when splitting on each feature."
+    }
+  })
+  
+  # XGBoost unified importance plot
+  output$xgb_importance_plot <- renderPlot({
     withProgress(message = 'Creando gráfico 3D', value = 0, {
       # Use modular scaling function
       df.scaled <- scale_ml_data(ML.db())
@@ -2127,12 +3012,30 @@ server <- function(input, output, session){
     })
   })
   
-  ## XGBoost - Selección de variables importantes ##
+  ## XGBoost - Variable Importance Features (unified caret approach)
   variables_xgb <- reactive({
-    req(input$ml_use_xgboost)  # Only compute if selected
-    # Use modular XGBoost functions
-    xgb_result <- train_xgboost_model(ML.db(), max_depth = 3, eta = 0.1, nrounds = 100)
-    extract_xgboost_importance(xgb_result, top_n = 30)
+    req(input$ml_use_xgboost)
+    
+    # Get result from advanced training (uses caret::varImp)
+    result <- tryCatch({
+      xgboost_advanced_result()
+    }, error = function(e) {
+      message("[variables_xgb] Advanced result not available: ", e$message)
+      NULL
+    })
+    
+    # Return features from varimp (NOT selected_features which is for RFE)
+    if (!is.null(result) && !is.null(result$varimp)) {
+      # Use unified format function
+      importance_df <- format_varimp_df(result$varimp, top_n = 30)
+      if (!is.null(importance_df) && nrow(importance_df) > 0) {
+        return(importance_df$Feature)
+      }
+    }
+    
+    # Fallback: empty vector
+    message("[variables_xgb] No variable importance available")
+    return(character(0))
   })
   
 
@@ -2144,61 +3047,91 @@ server <- function(input, output, session){
     calculate_shap_values(xgb_result)
   })
   
-
-  output$shap_importance_plot <- renderPlot({
-    req(input$ml_use_xgboost)  # Only render if selected
-    shap_values <- xgb.shap()
-    sv_importance(shap_values, show_numbers = TRUE) +
-      theme_microarrai() +
-      ggtitle("SHAP Importance Plot")
+  # XGBoost unified importance plot (SHAP or VarImp)
+  output$xgb_importance_plot <- renderPlot({
+    req(input$ml_use_xgboost)
+    
+    plot_type <- if(!is.null(input$xgb_importance_type)) input$xgb_importance_type else "varimp"
+    
+    if(plot_type == "shap") {
+      # SHAP values plot
+      shap_values <- xgb.shap()
+      sv_importance(shap_values, show_numbers = TRUE) +
+        theme_minimal() +
+        theme(axis.text = element_text(size = 10))
+    } else {
+      # Variable Importance (caret::varImp)
+      top_n <- if(!is.null(input$xgb_top_n)) input$xgb_top_n else 15
+      
+      result <- tryCatch(xgboost_advanced_result(), error = function(e) NULL)
+      
+      if (is.null(result) || is.null(result$varimp)) {
+        return(ggplot() + 
+          annotate("text", x = 0, y = 0, label = "Variable importance not available") +
+          theme_void())
+      }
+      
+      importance_df <- format_varimp_df(result$varimp, top_n = top_n)
+      
+      if (is.null(importance_df) || nrow(importance_df) == 0) {
+        return(ggplot() + 
+          annotate("text", x = 0, y = 0, label = "No features available") +
+          theme_void())
+      }
+      
+      # Simple ggplot
+      ggplot(importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+        geom_col(fill = "#f39c12", alpha = 0.8) +
+        coord_flip() +
+        labs(title = paste("Top", top_n, "Most Important Features (XGBoost)"),
+             x = NULL, y = "Relative Importance (Gain)") +
+        theme_minimal() +
+        theme(axis.text = element_text(size = 10))
+    }
   })
   
-  output$shap_importance_bee_plot <- renderPlot({
-    req(input$ml_use_xgboost)  # Only render if selected
-    shap_values <- xgb.shap()
-    sv_importance(shap_values, kind = "bee") +
-      theme_microarrai() +
-      ggtitle("SHAP Bee Swarm Plot")
+  # XGBoost Radar Plot for Performance Metrics
+  output$xgb_radar <- renderGirafe({
+    req(input$ml_use_xgboost)
+    result <- tryCatch(xgboost_advanced_result(), error = function(e) NULL)
+    
+    if(is.null(result)) {
+      return(NULL)
+    }
+    
+    create_performance_radar(result, model_color = "#f39c12")
   })
   
-  # Waterfall plot 
-  output$shap_waterfall_plot <- renderPlot({
-    req(input$ml_use_xgboost)  # Only render if selected
-    shap_values <- xgb.shap()
-    sv_waterfall(shap_values, row_id = 2) +
-      ggtitle("Waterfall plot for second prediction") +
-      theme_microarrai()
-  })
+  # Legacy SHAP plot removed - now integrated in xgb_importance_plot
   
-  # Force plot
-  output$shap_force_plot <- renderPlot({
-    req(input$ml_use_xgboost)  # Only render if selected
-    shap_values <- xgb.shap()
-    sv_force(shap_values, row_id = 2) +
-      ggtitle("Force plot for second prediction") +
-      theme_microarrai()
-  })
   #### End supervised Machine ####
   
   
   output$venn.plot <- renderPlot({
-    # Build list dynamically based on selected models
+    # Get top N from slider
+    top_n <- if(!is.null(input$consensus_top_n)) input$consensus_top_n else 20
+    
+    # Build list dynamically based on selected models, limited to top_n
     model_vars <- list()
     
     if (!is.null(input$ml_use_c50) && input$ml_use_c50) {
-      model_vars[["C5.0"]] <- variables_c5()
+      all_vars <- variables_c5()
+      model_vars[["C5.0"]] <- head(all_vars, top_n)
     }
     
     if (!is.null(input$ml_use_rf) && input$ml_use_rf) {
-      model_vars[["Random Forest"]] <- variables_rf()
+      all_vars <- variables_rf()
+      model_vars[["Random Forest"]] <- head(all_vars, top_n)
     }
     
     if (!is.null(input$ml_use_svm) && input$ml_use_svm) {
-      model_vars[["SVM"]] <- variables_importantes_reactive()
+      all_vars <- variables_importantes_reactive()
+      model_vars[["SVM"]] <- head(all_vars, top_n)
     }
     
     if (!is.null(input$ml_use_xgboost) && input$ml_use_xgboost) {
-      model_vars[["XGBoost"]] <- variables_xgb()
+      all_vars <- variables_xgb()
+      model_vars[["XGBoost"]] <- head(all_vars, top_n)
     }
     
     # Only render if at least 2 models selected
@@ -2209,7 +3142,7 @@ server <- function(input, output, session){
       fill_color = custom_palette,
       stroke_size = 0.5, set_name_size = 4, text_size = 4
     ) +
-      ggtitle("Consensus of Variables across Selected Models")
+      ggtitle(paste("Consensus of Top", top_n, "Variables per Model"))
   })
   
   output$consensus_vars <- renderText({
@@ -2239,6 +3172,90 @@ server <- function(input, output, session){
       paste(consensus, collapse = ", ")
     } else {
       "There are no variables in common between the models."
+    }
+  })
+  
+  # Consensus biomarkers list UI
+  output$consensus_biomarkers_list <- renderUI({
+    # Get top N from slider
+    top_n <- if(!is.null(input$consensus_top_n)) input$consensus_top_n else 20
+    
+    # Build list dynamically based on selected models, limited to top_n
+    model_vars <- list()
+    
+    if (!is.null(input$ml_use_c50) && input$ml_use_c50) {
+      all_vars <- variables_c5()
+      model_vars[["C5.0"]] <- head(all_vars, top_n)
+    }
+    
+    if (!is.null(input$ml_use_rf) && input$ml_use_rf) {
+      all_vars <- variables_rf()
+      model_vars[["Random Forest"]] <- head(all_vars, top_n)
+    }
+    
+    if (!is.null(input$ml_use_svm) && input$ml_use_svm) {
+      all_vars <- variables_importantes_reactive()
+      model_vars[["SVM"]] <- head(all_vars, top_n)
+    }
+    
+    if (!is.null(input$ml_use_xgboost) && input$ml_use_xgboost) {
+      all_vars <- variables_xgb()
+      model_vars[["XGBoost"]] <- head(all_vars, top_n)
+    }
+    
+    req(length(model_vars) >= 2)
+    
+    # Find features in multiple models
+    all_features <- unique(unlist(model_vars))
+    feature_counts <- sapply(all_features, function(feat) {
+      sum(sapply(model_vars, function(vars) feat %in% vars))
+    })
+    
+    # Get consensus features (in 2+ models)
+    consensus_features <- names(feature_counts[feature_counts >= 2])
+    consensus_features <- consensus_features[order(-feature_counts[consensus_features])]
+    
+    if (length(consensus_features) > 0) {
+      tags$div(
+        style = "background: #f8f9fa; padding: 15px; border-radius: 8px; max-height: 400px; overflow-y: auto;",
+        lapply(seq_along(consensus_features), function(i) {
+          feat <- consensus_features[i]
+          count <- feature_counts[feat]
+          tags$div(
+            style = "padding: 10px; margin-bottom: 8px; background: white; border-radius: 4px; border-left: 4px solid #3498db;",
+            tags$div(
+              style = "display: flex; justify-content: space-between; align-items: center;",
+              tags$div(
+                tags$strong(paste0(i, ". "), style = "color: #3498db; margin-right: 8px;"),
+                tags$span(feat, style = "color: #191c32; font-weight: 500;")
+              ),
+              tags$span(
+                paste0(count, "/", length(model_vars), " models"),
+                style = "background: #3498db; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;"
+              )
+            )
+          )
+        }),
+        tags$div(
+          style = "margin-top: 15px; padding: 12px; background: #e8f5e9; border-radius: 4px; border-left: 3px solid #4caf50;",
+          tags$small(
+            style = "color: #2e7d32; font-weight: 500;",
+            icon("check-circle", style = "margin-right: 5px;"),
+            "Total: ", length(consensus_features), " consensus biomarkers identified"
+          )
+        )
+      )
+    } else {
+      tags$div(
+        style = "background: #fff3cd; padding: 20px; border-radius: 8px; border-left: 4px solid #ffc107; text-align: center;",
+        tags$p(
+          style = "color: #856404; margin: 0; font-size: 14px;",
+          icon("exclamation-triangle", style = "margin-right: 8px;"),
+          strong("No consensus features found."),
+          tags$br(),
+          tags$span("Features selected by different models do not overlap. Consider adjusting feature selection thresholds.", style = "font-size: 12px;")
+        )
+      )
     }
   })
   
@@ -2514,23 +3531,51 @@ server <- function(input, output, session){
  
     rep.pos <- posiciones(input$amino_count, input$chain_length, input$spacing, input$offset)
     Protein <- bind_cols(Protein, rep.pos)
+  })
+  
+  # Output del gráfico (fuera del observeEvent)
+  output$protein_plot <- renderPlot({
+    req(fasta_data(), bio_data(), input$plot_btn)
     
-    # Output del gráfico
-    output$protein_plot <- renderPlot({
-      Protein %>% ggplot(aes(x= x, y= y, label = AA_ref)) +
-        geom_point(size = 10, alpha= .3) +
-        geom_text(size = 4) +
-        ggrepel::geom_text_repel(aes(label= Representation, nudge_y = ifelse(y == max(y), y+1, y)),
-                                 box.padding = 0.5,    
-                                 point.padding = 0.3, 
-                                 size = 4, 
-                                 label.size = 0,
-                                 segment.color = 'black', 
-                                 nudge_x = 0.7,    
-                                 fill = NA,        
-                                 label.r = 0.2) +
-        theme_microarrai()
-    })
+    Ref.P01003 <- fasta_data() %>%
+      filter(X1 != "") %>%
+      rename(AA_ref = X1) %>%
+      mutate(Pos = 1:nrow(.))
+    
+    P01003 <- bio_data() %>%
+      select(X3, X4, X5) %>%
+      rename(Biochemical_info = X3, AA_Start = X4, AA_Finish = X5)
+    
+    P01003.S <- P01003 %>% filter(Biochemical_info == "Disulfide bond") 
+    P01003.S1 <- P01003.S %>% select(Biochemical_info, AA_Start) %>% rename(Pos = AA_Start)
+    P01003.S2 <-  P01003.S %>% select(Biochemical_info, AA_Finish) %>% rename(Pos = AA_Finish)
+    P01003.S <- bind_rows(P01003.S1, P01003.S2)
+    
+    P01003.G <- P01003 %>% filter(Biochemical_info == "Glycosylation") %>%
+      select(Biochemical_info, AA_Start) %>%
+      rename(Pos = AA_Start)
+    
+    Biochemical.P01003 <- bind_rows(P01003.S, P01003.G)
+    
+    Protein <- Ref.P01003 %>% full_join(Biochemical.P01003) %>%
+      mutate(Representation = ifelse(Biochemical_info == "Disulfide bond", "S", "Ch"))
+    
+    rep.pos <- posiciones(input$amino_count, input$chain_length, input$spacing, input$offset)
+    Protein <- bind_cols(Protein, rep.pos)
+    
+    Protein %>% ggplot(aes(x= x, y= y, label = AA_ref)) +
+      geom_point(size = 10, alpha= .3) +
+      geom_text(size = 4) +
+      ggrepel::geom_text_repel(aes(label= Representation, nudge_y = ifelse(y == max(y), y+1, y)),
+                               box.padding = 0.5,    
+                               point.padding = 0.3, 
+                               size = 4, 
+                               label.size = 0,
+                               segment.color = 'black', 
+                               nudge_x = 0.7,    
+                               fill = NA,        
+                               label.r = 0.2) +
+      theme_microarrai()
   })
 
   #### End 2D Represent ####

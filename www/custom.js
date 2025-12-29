@@ -1,7 +1,7 @@
 /* ============================================================================
  * MicroarrAI - Custom JavaScript
  * ============================================================================
- * Description: Scroll-based tile animation for Home page
+ * Description: Scroll-based tile animation for Home page + ML Sidebar
  * Author: Sergio Olmos Piñero et al.
  * ============================================================================
  */
@@ -52,3 +52,134 @@ document.addEventListener('scroll', function() {
     }
   });
 });
+
+/**
+ * Sidebar Management System
+ * 
+ * Handles floating sidebars for ML and Peptide dashboards
+ */
+$(document).ready(function() {
+  
+  // Custom easing function for smooth scrolling
+  $.easing.easeInOutCubic = function(x, t, b, c, d) {
+    if ((t /= d / 2) < 1) return c / 2 * t * t * t + b;
+    return c / 2 * ((t -= 2) * t * t + 2) + b;
+  };
+  
+  // ===== ML SIDEBAR =====
+  var mlSidebarOpen = false;
+  
+  // ML Sidebar Toggle
+  $(document).on('click', '#ml-sidebar-toggle', function() {
+    mlSidebarOpen = !mlSidebarOpen;
+    
+    if (mlSidebarOpen) {
+      $('#ml-sidebar').addClass('open').css('left', '0');
+      $('.ml-content').css('margin-left', '320px');
+      $(this).addClass('sidebar-open');
+      $(this).html('<i class="fa fa-times"></i>');
+    } else {
+      $('#ml-sidebar').removeClass('open').css('left', '-320px');
+      $('.ml-content').css('margin-left', '0');
+      $(this).removeClass('sidebar-open');
+      $(this).html('<i class="fa fa-bars"></i>');
+    }
+  });
+  
+  // ML Sidebar Navigation
+  $(document).on('click', '.ml-sidebar-item', function() {
+    var targetSection = $(this).data('target');
+    
+    // Update active state
+    $('.ml-sidebar-item').removeClass('active');
+    $(this).addClass('active');
+    
+    // Scroll to the section if it exists
+    var targetElement = $('#' + targetSection);
+    if (targetElement.length > 0) {
+      $('html, body').stop().animate({
+        scrollTop: targetElement.offset().top - 100
+      }, 200, 'easeInOutCubic');
+    }
+    
+    // Send to Shiny
+    Shiny.setInputValue('ml_nav_section', targetSection, {priority: "event"});
+  });
+  
+  // ===== PEPTIDE SIDEBAR =====
+  var peptideSidebarOpen = false;
+  
+  // Peptide Sidebar Toggle
+  $(document).on('click', '#peptide-sidebar-toggle', function() {
+    peptideSidebarOpen = !peptideSidebarOpen;
+    
+    if (peptideSidebarOpen) {
+      $('#peptide-sidebar').addClass('open').css('left', '0');
+      $('.ml-content').css('margin-left', '320px');
+      $(this).addClass('sidebar-open');
+      $(this).html('<i class="fa fa-times"></i>');
+    } else {
+      $('#peptide-sidebar').removeClass('open').css('left', '-320px');
+      $('.ml-content').css('margin-left', '0');
+      $(this).removeClass('sidebar-open');
+      $(this).html('<i class="fa fa-bars"></i>');
+    }
+  });
+  
+  // Peptide Sidebar Navigation (SCROLL like ML)
+  $(document).on('click', '#peptide-sidebar .ml-sidebar-item', function() {
+    var targetSection = $(this).data('target');
+    
+    // Update active state
+    $('#peptide-sidebar .ml-sidebar-item').removeClass('active');
+    $(this).addClass('active');
+    
+    // Scroll to the section if it exists
+    var targetElement = $('#' + targetSection);
+    if (targetElement.length > 0) {
+      $('html, body').stop().animate({
+        scrollTop: targetElement.offset().top - 100
+      }, 200, 'easeInOutCubic');
+    }
+    
+    // Send to Shiny
+    Shiny.setInputValue('peptide_nav_section', targetSection, {priority: "event"});
+  });
+  
+  // ===== ACTIVE STATE STYLING =====
+  $(document).on('mouseenter', '.ml-sidebar-item, .peptide-nav-item', function() {
+    if (!$(this).hasClass('active')) {
+      $(this).css('background', 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)');
+      $(this).css('color', 'white');
+      $(this).css('transform', 'translateX(5px)');
+    }
+  });
+  
+  $(document).on('mouseleave', '.ml-sidebar-item, .peptide-nav-item', function() {
+    if (!$(this).hasClass('active')) {
+      $(this).css('background', '#f8f9fa');
+      $(this).css('color', '#191c32');
+      $(this).css('transform', 'translateX(0)');
+    }
+  });
+  
+  // Set active item styling
+  $(document).on('click', '.ml-sidebar-item, .peptide-nav-item', function() {
+    // Remove active styling from all siblings
+    $(this).siblings().css({
+      'background': '#f8f9fa',
+      'color': '#191c32',
+      'transform': 'translateX(0)',
+      'box-shadow': 'none'
+    });
+    
+    // Add active styling to clicked item
+    $(this).css({
+      'background': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      'color': 'white',
+      'transform': 'translateX(5px)',
+      'box-shadow': '0 4px 12px rgba(102, 126, 234, 0.3)'
+    });
+  });
+});
+
