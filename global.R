@@ -23,6 +23,7 @@ library(tibble)     # Modern data frames
 library(readr)      # Fast reading of delimited files
 library(purrr)      # Functional programming tools
 library(stringr)    # String manipulation
+library(openxlsx)   # Excel file reading and writing
 
 # -----------------------------------------------------------------------------
 # Shiny Web Framework
@@ -32,7 +33,9 @@ library(shinyWidgets)     # Enhanced UI widgets
 library(shinydashboard)   # Dashboard layout components
 library(shinycssloaders)  # Loading animations
 library(DT)               # Interactive DataTables
-
+library(shinyjs)         # JavaScript integration
+library(shinythemes)     # Predefined themes for Shiny apps
+library(bslib)
 # -----------------------------------------------------------------------------
 # Data Visualization - 2D
 # -----------------------------------------------------------------------------
@@ -43,7 +46,7 @@ library(cowplot)      # Plot composition and themes
 library(ggrepel)      # Non-overlapping text labels
 library(ggvenn)       # Venn diagrams
 library(formattable)  # Styled and formatted tables
-
+library(ggiraph)      # Interactive ggplot2 graphics
 # -----------------------------------------------------------------------------
 # Data Visualization - 3D
 # -----------------------------------------------------------------------------
@@ -56,7 +59,7 @@ library(car)          # 3D ellipsoids and scatter plots
 library(vegan)        # Ecological statistics (PCoA, NMDS, distance matrices)
 library(dbscan)       # Density-based spatial clustering (DBSCAN)
 library(cluster)      # Clustering algorithms and silhouette analysis
-
+library(shiny.molstar)    # Molecular structure visualization (Molstar)
 # -----------------------------------------------------------------------------
 # Machine Learning - Supervised Classification
 # -----------------------------------------------------------------------------
@@ -103,6 +106,8 @@ source("R/server/regression_models.R", encoding = "UTF-8")
 # 3D visualization and interactive plots
 source("R/server/visualization_3d.R", encoding = "UTF-8")
 
+# UI helper functions (card containers, section titles, etc.)
+source("R/utils/ui_helpers.R", encoding = "UTF-8")
 # =============================================================================
 # UI MODULES
 # =============================================================================
@@ -123,8 +128,23 @@ source("Def/Function2.R", encoding = "UTF-8")
 # Synthetic data generation for testing and demos
 source("Def/synthetic_data.R", encoding = "UTF-8")
 
+# Ggiraph theme and interactive plot utilities
+source("Def/ggiraph_theme.R", encoding = "UTF-8")
+
 # Radar plot utilities for model performance visualization
 source("R/utils/radar_plot.R", encoding = "UTF-8")
+
+# Color palette definitions
+source("R/utils/colors.R", encoding = "UTF-8")
+
+# Custom ggplot2 themes
+source("R/utils/theme.R", encoding = "UTF-8")
+
+# Custom ggplot2 scales
+source("R/utils/scales.R", encoding = "UTF-8")
+
+# Plot utility functions
+source("R/utils/plot_utils.R", encoding = "UTF-8")
 
 # =============================================================================
 # GLOBAL CONFIGURATION
