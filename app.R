@@ -2712,7 +2712,7 @@ server <- function(input, output, session){
   variables_c5 <- reactive({
     req(input$ml_use_c50)
     
-    # Get result from advanced training (uses caret::varImp)
+    # Get result from advanced training
     result <- tryCatch({
       c50_advanced_result()
     }, error = function(e) {
@@ -2720,17 +2720,27 @@ server <- function(input, output, session){
       NULL
     })
     
-    # Return features from varimp (NOT selected_features which is for RFE)
-    if (!is.null(result) && !is.null(result$varimp)) {
-      # Use unified format function
+    if (is.null(result)) {
+      return(character(0))
+    }
+    
+    # PRIORITY 1: If RFE was used, show selected features from RFE
+    if (!is.null(result$rfe_used) && result$rfe_used && !is.null(result$selected_features)) {
+      message("[variables_c5] Using RFE-selected features (", length(result$selected_features), " features)")
+      return(head(result$selected_features, 30))  # Top 30 from RFE
+    }
+    
+    # PRIORITY 2: Try variable importance (if available)
+    if (!is.null(result$varimp)) {
       importance_df <- format_varimp_df(result$varimp, top_n = 30)
       if (!is.null(importance_df) && nrow(importance_df) > 0) {
+        message("[variables_c5] Using varImp-ranked features")
         return(importance_df$Feature)
       }
     }
     
     # Fallback: empty vector
-    message("[variables_c5] No variable importance available")
+    message("[variables_c5] No variable importance or RFE features available")
     return(character(0))
   })
   
@@ -2800,17 +2810,27 @@ server <- function(input, output, session){
       NULL
     })
     
-    # Return features from varimp (NOT selected_features which is for RFE)
-    if (!is.null(result) && !is.null(result$varimp)) {
-      # Use unified format function
+    if (is.null(result)) {
+      return(character(0))
+    }
+    
+    # PRIORITY 1: If RFE was used, show selected features from RFE
+    if (!is.null(result$rfe_used) && result$rfe_used && !is.null(result$selected_features)) {
+      message("[variables_rf] Using RFE-selected features (", length(result$selected_features), " features)")
+      return(head(result$selected_features, 30))  # Top 30 from RFE
+    }
+    
+    # PRIORITY 2: Try variable importance (if available)
+    if (!is.null(result$varimp)) {
       importance_df <- format_varimp_df(result$varimp, top_n = 30)
       if (!is.null(importance_df) && nrow(importance_df) > 0) {
+        message("[variables_rf] Using varImp-ranked features")
         return(importance_df$Feature)
       }
     }
     
     # Fallback: empty vector
-    message("[variables_rf] No variable importance available")
+    message("[variables_rf] No variable importance or RFE features available")
     return(character(0))
   })
   
@@ -2863,7 +2883,7 @@ server <- function(input, output, session){
   variables_importantes_reactive <- reactive({
     req(input$ml_use_svm)
     
-    # Get result from advanced training (uses caret::varImp)
+    # Get result from advanced training
     result <- tryCatch({
       svm_advanced_result()
     }, error = function(e) {
@@ -2871,17 +2891,27 @@ server <- function(input, output, session){
       NULL
     })
     
-    # Return features from varimp (NOT selected_features which is for RFE)
-    if (!is.null(result) && !is.null(result$varimp)) {
-      # Use unified format function
+    if (is.null(result)) {
+      return(character(0))
+    }
+    
+    # PRIORITY 1: If RFE was used, show selected features from RFE
+    if (!is.null(result$rfe_used) && result$rfe_used && !is.null(result$selected_features)) {
+      message("[variables_svm] Using RFE-selected features (", length(result$selected_features), " features)")
+      return(head(result$selected_features, 30))  # Top 30 from RFE
+    }
+    
+    # PRIORITY 2: Try variable importance (if available)
+    if (!is.null(result$varimp)) {
       importance_df <- format_varimp_df(result$varimp, top_n = 30)
       if (!is.null(importance_df) && nrow(importance_df) > 0) {
+        message("[variables_svm] Using varImp-ranked features")
         return(importance_df$Feature)
       }
     }
     
     # Fallback: empty vector
-    message("[variables_svm] No variable importance available")
+    message("[variables_svm] No variable importance or RFE features available")
     return(character(0))
   })
   

@@ -89,6 +89,8 @@ train_model_advanced <- function(data,
     model_type = model_type,
     use_rfe = use_rfe,
     use_cv = use_cv,
+    rfe_used = FALSE,           # Track if RFE actually ran
+    rfe_reason = NULL,          # Why RFE was used/skipped
     selected_features = NULL,
     metrics = list(),
     cv_results = NULL,
@@ -96,50 +98,129 @@ train_model_advanced <- function(data,
     model = NULL
   )
   
-  # Scale data for SVM
+  # Convert factors to dummy variables for SVM (required for RFE and model training)
   if (model_type == "svm") {
+    # First convert factors to dummies
+    target <- data$target
+    predictors <- data[, -which(names(data) == "target"), drop = FALSE]
+    
+    # Identify factor columns
+    factor_cols <- sapply(predictors, is.factor)
+    
+    if (any(factor_cols)) {
+      message("[SVM] Converting ", sum(factor_cols), " factor column(s) to dummy variables...")
+      
+      # Create dummy variables using model.matrix
+      formula_str <- paste("~", paste(names(predictors), collapse = " + "), "- 1")
+      dummy_matrix <- model.matrix(as.formula(formula_str), data = predictors)
+      
+      # Reconstruct data with dummies
+      data <- as.data.frame(dummy_matrix)
+      data$target <- target
+      
+      message("[SVM] Expanded from ", ncol(predictors), " to ", ncol(data) - 1, " features after dummy encoding")
+    }
+    
+    # Then scale
     data <- scale_ml_data(data)
   }
   
-  # Step 1: Feature Selection with RFE (if requested)
-  if (use_rfe && model_type %in% c("svm", "rf", "c50")) {
-    message("[RFE] Starting Recursive Feature Elimination...")
+  # Step 1: Feature Selection with RFE (Safe, Model-Specific Implementation)
+  # CRITICAL: RFE requires cross-validation to evaluate feature subsets
+  if (use_rfe && !use_cv) {
+    message("[RFE] DISABLED: RFE requires cross-validation (CV=TRUE) to evaluate feature subsets")
+    result$rfe_used <- FALSE
+    result$rfe_reason <- "RFE requires CV to be enabled. Enable CV to use RFE for feature selection."
+    result$selected_features <- setdiff(colnames(data), "target")
+    use_rfe <- FALSE  # Override to skip RFE logic below
+  }
+  
+  if (use_rfe) {
+    message("[RFE] Checking if RFE can be used for ", model_type, "...")
     
-    # Configure RFE control
-    ctrl_rfe <- caret::rfeControl(
-      functions = caret::caretFuncs,
-      method = "cv",
-      number = cv_folds,
-      verbose = FALSE
-    )
-    
-    # Prepare data for RFE
-    x <- data[, -which(names(data) == "target")]
+    # Prepare data for RFE validation
+    x <- data[, -which(names(data) == "target"), drop = FALSE]
     y <- data$target
     
-    # Determine RFE sizes based on data
-    max_features <- min(ncol(x), max(rfe_sizes))
-    rfe_sizes_adj <- rfe_sizes[rfe_sizes <= max_features]
+    # Check if RFE is feasible for this model and data
+    rfe_check <- can_use_rfe(model_type, x, rfe_sizes)
     
-    # Run RFE
-    rfe_result <- caret::rfe(
-      x = x,
-      y = y,
-      sizes = rfe_sizes_adj,
-      rfeControl = ctrl_rfe,
-      method = ifelse(model_type == "svm", "svmLinear", 
-                     ifelse(model_type == "rf", "rf", "C5.0"))
-    )
-    
-    result$rfe_results <- rfe_result
-    result$selected_features <- caret::predictors(rfe_result)
-    message("[RFE] Completed. Selected ", length(result$selected_features), " features")
-    
-    # Filter data to selected features
-    data <- data[, c("target", result$selected_features)]
+    if (!rfe_check$ok) {
+      # RFE not possible - log reason and continue without it
+      message("[RFE] DISABLED: ", rfe_check$reason)
+      result$rfe_used <- FALSE
+      result$rfe_reason <- rfe_check$reason
+      result$selected_features <- colnames(x)  # Use all features
+      
+    } else {
+      # RFE is safe to proceed
+      message("[RFE] ENABLED: ", rfe_check$reason)
+      if (!is.null(rfe_check$note)) {
+        message("[RFE] Note: ", rfe_check$note)
+      }
+      
+      # Adjust RFE sizes to available features
+      rfe_sizes_adj <- adjust_rfe_sizes(rfe_sizes, ncol(x))
+      message("[RFE] Using sizes: ", paste(rfe_sizes_adj, collapse = ", "))
+      
+      # Configure RFE with MODEL-SPECIFIC functions
+      ctrl_rfe <- caret::rfeControl(
+        functions = rfe_check$funcs,  # Model-specific (treebagFuncs, rfFuncs, etc.)
+        method = "cv",
+        number = cv_folds,
+        verbose = FALSE,
+        allowParallel = FALSE  # Avoid shinyapps.io crashes
+      )
+      
+      # Run RFE with error handling
+      rfe_result <- tryCatch(
+        {
+          message("[RFE] Running feature selection...")
+          caret::rfe(
+            x = x,
+            y = y,
+            sizes = rfe_sizes_adj,
+            rfeControl = ctrl_rfe,
+            method = switch(model_type,
+              "c50" = "C5.0",
+              "rf" = "rf",
+              "svm" = "svmLinear",
+              NULL
+            )
+          )
+        },
+        error = function(e) {
+          message("[RFE] ERROR: ", e$message)
+          message("[RFE] Falling back to using all features")
+          NULL
+        }
+      )
+      
+      if (!is.null(rfe_result)) {
+        result$rfe_results <- rfe_result
+        result$selected_features <- caret::predictors(rfe_result)
+        result$rfe_used <- TRUE
+        result$rfe_reason <- paste0("RFE completed successfully. Selected ", 
+                                    length(result$selected_features), 
+                                    " features from ", ncol(x))
+        
+        message("[RFE] SUCCESS: Selected ", length(result$selected_features), " features")
+        
+        # Filter data to selected features
+        data <- data[, c("target", result$selected_features), drop = FALSE]
+        
+      } else {
+        # RFE failed - use all features
+        result$rfe_used <- FALSE
+        result$rfe_reason <- "RFE failed during execution. Using all features."
+        result$selected_features <- colnames(x)
+      }
+    }
     
   } else {
-    # Use all features or top N from simple importance
+    # RFE not requested
+    result$rfe_used <- FALSE
+    result$rfe_reason <- "RFE not requested by user"
     result$selected_features <- setdiff(colnames(data), "target")
   }
   
@@ -168,9 +249,11 @@ train_model_advanced <- function(data,
   }
   
   # Step 3: Hyperparameter Grid (if tuning requested)
+  # IMPORTANT: When use_cv=FALSE, we MUST disable tuning to avoid "Only one model" error
   tune_grid <- NULL
   
-  if (tune_params) {
+  if (tune_params && use_cv) {
+    # Only tune when CV is enabled
     tune_grid <- switch(model_type,
       "rf" = expand.grid(mtry = c(2, 5, 10, 15)),
       "svm" = expand.grid(C = c(0.1, 1, 10, 100)),
@@ -178,6 +261,23 @@ train_model_advanced <- function(data,
         nrounds = c(50, 100, 150),
         max_depth = c(3, 6, 9),
         eta = c(0.01, 0.1, 0.3),
+        gamma = 0,
+        colsample_bytree = 1,
+        min_child_weight = 1,
+        subsample = 1
+      ),
+      NULL
+    )
+  } else if (!use_cv) {
+    # When CV is disabled, force default parameters for each model
+    tune_grid <- switch(model_type,
+      "c50" = data.frame(trials = 1, model = "tree", winnow = FALSE),
+      "rf" = data.frame(mtry = floor(sqrt(ncol(data) - 1))),
+      "svm" = data.frame(C = 1),
+      "xgboost" = data.frame(
+        nrounds = 100,
+        max_depth = 6,
+        eta = 0.3,
         gamma = 0,
         colsample_bytree = 1,
         min_child_weight = 1,

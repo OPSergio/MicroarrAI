@@ -60,6 +60,15 @@ document.addEventListener('scroll', function() {
  */
 $(document).ready(function() {
   
+  // Auto-enable CV when RFE is checked (RFE requires CV to work)
+  $(document).on('change', '#ml_use_rfe', function() {
+    if ($(this).is(':checked')) {
+      $('#ml_use_cv').prop('checked', true);
+      // Trigger change event to update Shiny
+      $('#ml_use_cv').trigger('change');
+    }
+  });
+  
   // Custom easing function for smooth scrolling
   $.easing.easeInOutCubic = function(x, t, b, c, d) {
     if ((t /= d / 2) < 1) return c / 2 * t * t * t + b;

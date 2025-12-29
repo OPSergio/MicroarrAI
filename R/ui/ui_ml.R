@@ -213,7 +213,7 @@ ui_ml <- function() {
                     tags$br(),
                     tags$small("Visual clustering with dendrograms", style = "color: #666;")
                   ),
-                  value = TRUE
+                  value = FALSE
                 ),
                 
                 # PCA
@@ -223,7 +223,7 @@ ui_ml <- function() {
                     tags$br(),
                     tags$small("Linear dimensionality reduction", style = "color: #666;")
                   ),
-                  value = TRUE
+                  value = FALSE
                 ),
                 
                 # PCoA
@@ -233,7 +233,7 @@ ui_ml <- function() {
                     tags$br(),
                     tags$small("Distance-based ordination", style = "color: #666;")
                   ),
-                  value = TRUE
+                  value = FALSE
                 ),
                 
                 # NMDS
@@ -243,7 +243,7 @@ ui_ml <- function() {
                     tags$br(),
                     tags$small("Non-linear ordination", style = "color: #666;")
                   ),
-                  value = TRUE
+                  value = FALSE
                 ),
                 
                 # DBSCAN
@@ -289,7 +289,7 @@ ui_ml <- function() {
                     tags$br(),
                     tags$small("Fast, interpretable classifier", style = "color: #666;")
                   ),
-                  value = TRUE
+                  value = FALSE
                 ),
                 
                 checkboxInput("ml_use_rf", 
@@ -307,7 +307,7 @@ ui_ml <- function() {
                     tags$br(),
                     tags$small("Maximum-margin classifier", style = "color: #666;")
                   ),
-                  value = TRUE
+                  value = FALSE
                 ),
                 
                 checkboxInput("ml_use_xgboost", 
@@ -335,7 +335,13 @@ ui_ml <- function() {
                     tags$span(
                       tags$strong("Recursive Feature Elimination (RFE)", style = "font-size: 13px;"),
                       tags$br(),
-                      tags$small("Iteratively remove less important features", style = "color: #666; font-size: 11px;")
+                      tags$small("Iteratively remove less important features", style = "color: #666; font-size: 11px;"),
+                      tags$br(),
+                      tags$small(
+                        icon("info-circle", style = "margin-right: 4px;"),
+                        "Requires Cross-Validation enabled",
+                        style = "color: #0066cc; font-size: 10px; font-weight: 600; margin-top: 4px; display: inline-block;"
+                      )
                     ),
                     value = FALSE
                   ),
