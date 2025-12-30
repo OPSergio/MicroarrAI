@@ -74,42 +74,672 @@ server <- function(input, output, session){
   raw_data <- reactiveVal(NULL)
   processed_data <- reactiveVal(NULL)
   database <- reactiveVal(NULL)
+  database_edited <- reactiveVal(NULL)
   pepdata <- reactiveVal(NULL)
+  available_analytes <- reactiveVal(NULL)
   
-##### Preprocesado de datos ####
-  observeEvent(input$process_button, {
+  # ===== ACTIVE DATABASE: Returns edited version if exists, else original =====
+  active_database <- reactive({
+    if (!is.null(database_edited()) && nrow(database_edited()) > 0) {
+      return(database_edited())
+    } else if (!is.null(database())) {
+      return(database())
+    } else {
+      return(NULL)
+    }
+  })
+  
+  # ===== UI Output: Input Mode Info =====
+  output$input_mode_info <- renderUI({
+    if (input$input_mode == "raw") {
+      tags$div(
+        style = "background: #d4edda; padding: 15px; border-radius: 8px; border-left: 4px solid #28a745;",
+        tags$h6(icon("check-circle"), " RAW Mode Selected", style = "color: #155724; margin-bottom: 10px;"),
+        tags$p("You will process GenePix CSV files with full normalization control.", 
+              style = "color: #155724; margin: 0;")
+      )
+    } else {
+      tags$div(
+        style = "background: #cce5ff; padding: 15px; border-radius: 8px; border-left: 4px solid #007bff;",
+        tags$h6(icon("upload"), " Processed Matrix Mode", style = "color: #004085; margin-bottom: 10px;"),
+        tags$p("You will upload pre-normalized data. Normalization steps will be skipped.", 
+              style = "color: #004085; margin: 0;")
+      )
+    }
+  })
+  
+  # ===== UI Output: Step 2 Instructions =====
+  output$step2_instructions <- renderUI({
+    if (input$input_mode == "raw") {
+      tagList(
+        tags$h5(icon("info-circle"), " Load RAW GenePix Files", style = "color: #191c32; margin-bottom: 10px;"),
+        tags$p("Select the folder containing your GenePix CSV output files.", style = "color: #191c32;"),
+        tags$p(tags$b("What happens next:"), style = "color: #191c32;"),
+        tags$ul(
+          style = "color: #191c32;",
+          tags$li("System will detect GenePix header automatically"),
+          tags$li("Analyte IDs will be extracted and cleaned"),
+          tags$li("Control selectors will be populated")
+        )
+      )
+    } else {
+      tagList(
+        tags$h5(icon("info-circle"), " Upload Processed Matrix", style = "color: #191c32; margin-bottom: 10px;"),
+        tags$p("Upload your pre-normalized expression matrix (.csv or .xlsx).", style = "color: #191c32;"),
+        tags$p(tags$b("Required format:"), style = "color: #191c32;"),
+        tags$ul(
+          style = "color: #191c32;",
+          tags$li("First column: 'id' with sample identifiers"),
+          tags$li("Other columns: numeric expression values"),
+          tags$li("Optional: Use channel prefixes (e.g., IgE_p001)")
+        )
+      )
+    }
+  })
+  
+  # ===== UI Output: Folder Status =====
+  output$folder_status <- renderUI({
+    if (is.null(path1()) || length(path1()) == 0 || path1() == "") {
+      tags$div(
+        style = "margin-top: 15px;",
+        tags$p(icon("folder"), " No folder selected", 
+              style = "color: #6c757d; font-style: italic;")
+      )
+    } else {
+      files <- list.files(path = path1(), pattern = "\\.csv$", full.names = TRUE)
+      tags$div(
+        style = "margin-top: 15px; background: #d4edda; padding: 15px; border-radius: 8px; border-left: 4px solid #28a745;",
+        tags$h6(icon("check-circle"), " Folder Loaded Successfully!", 
+               style = "color: #155724; margin-bottom: 10px;"),
+        tags$p(tags$b("Path:"), basename(path1()), style = "color: #155724; margin: 5px 0;"),
+        tags$p(tags$b("CSV files found:"), length(files), style = "color: #155724; margin: 5px 0;"),
+        tags$p(tags$b("Analytes detected:"), 
+              if (!is.null(available_analytes())) length(available_analytes()) else "Processing...",
+              style = "color: #155724; margin: 5px 0;")
+      )
+    }
+  })
+  
+  # ===== UI Output: Normalization Method Description =====
+output$normalization_method_description <- renderUI({
+  if (input$normalization_method == "Z-score") {
+    tagList(
+      tags$p(tags$b("Z-score Normalization:"), style = "color: #191c32; margin-bottom: 5px;"),
+      tags$ul(
+        style = "color: #191c32; font-size: 13px;",
+        tags$li("Uses median and MAD of negative controls"),
+        tags$li("Robust to outliers"),
+        tags$li("Formula: (value - median) / MAD"),
+        tags$li("Recommended for most cases")
+      )
+    )
+  } else {
+    tagList(
+      tags$p(tags$b("Median Scaling:"), style = "color: #191c32; margin-bottom: 5px;"),
+      tags$ul(
+        style = "color: #191c32; font-size: 13px;",
+        tags$li("Divides by median expression"),
+        tags$li("Simple centering method"),
+        tags$li("Formula: value / median(all values)"),
+        tags$li("Less robust than Z-score")
+      )
+    )
+  }
+  })
+  
+  # ===== Analyte ID extraction from RAW files =====
+  observeEvent(path1(), {
+    req(input$input_mode == "raw")
     req(path1())
     
     files <- list.files(path = path1(), pattern = "\\.csv$", full.names = TRUE)
+    if (length(files) > 0) {
+      # Show processing notification
+      showNotification("Extracting analyte IDs from files...", type = "message", duration = 2)
+      
+      analytes <- get_unique_analytes(files)
+      available_analytes(analytes)
+      
+      # Group similar analytes for easier selection
+      # Find base names (e.g., PBS_1X from PBS_1X_1, PBS_1X_2)
+      analyte_groups <- lapply(analytes, function(x) {
+        # Try to detect numbered variants
+        base <- sub("_\\d+$", "", x)
+        list(display = x, value = x, group = base)
+      })
+      
+      # Update control selectors with grouped choices
+      updateSelectizeInput(session, "negative_controls", 
+                       choices = setNames(analytes, analytes),
+                       selected = NULL,
+                       server = TRUE)
+      updateSelectizeInput(session, "positive_controls", 
+                       choices = setNames(analytes, analytes),
+                       selected = NULL,
+                       server = TRUE)
+      
+      # Show success notification
+      showNotification(
+        paste("Found", length(analytes), "unique analytes. Control selectors updated."),
+        type = "message",
+        duration = 3
+      )
+    }
+  })
+  
+  # ===== Apply Regex to Negative Controls =====
+  observeEvent(input$apply_neg_regex, {
+    req(input$neg_ctrl_regex)
+    req(available_analytes())
     
-    withProgress(message = 'Processing files...', value = 0, {
-      processed_data(
-        process_microarray_batch(
-          files, 
-          input$normalization_method,
-          progress_callback = function(i, total, name) {
-            incProgress(1/total, detail = paste("Sample", name, "complete"))
-          }
+    tryCatch({
+      pattern <- input$neg_ctrl_regex
+      matching <- grep(pattern, available_analytes(), value = TRUE)
+      
+      if (length(matching) > 0) {
+        updateSelectizeInput(session, "negative_controls", selected = matching)
+        showNotification(
+          paste("Selected", length(matching), "controls matching pattern:", pattern),
+          type = "message",
+          duration = 5
         )
+      } else {
+        showNotification(
+          paste("No analytes match the pattern:", pattern),
+          type = "warning",
+          duration = 3
+        )
+      }
+    }, error = function(e) {
+      showNotification(
+        paste("Invalid regex pattern:", e$message),
+        type = "error",
+        duration = 5
       )
     })
   })
   
-  observeEvent(input$scale_button, {
-    req(processed_data())
-    scaled_data <- processed_data() %>%
-      mutate(across(where(is.numeric), scale))
-    processed_data(scaled_data)
+  # ===== Apply Regex to Positive Controls =====
+  observeEvent(input$apply_pos_regex, {
+    req(input$pos_ctrl_regex)
+    req(available_analytes())
+    
+    tryCatch({
+      pattern <- input$pos_ctrl_regex
+      matching <- grep(pattern, available_analytes(), value = TRUE)
+      
+      if (length(matching) > 0) {
+        updateSelectizeInput(session, "positive_controls", selected = matching)
+        showNotification(
+          paste("Selected", length(matching), "controls matching pattern:", pattern),
+          type = "message",
+          duration = 5
+        )
+      } else {
+        showNotification(
+          paste("No analytes match the pattern:", pattern),
+          type = "warning",
+          duration = 3
+        )
+      }
+    }, error = function(e) {
+      showNotification(
+        paste("Invalid regex pattern:", e$message),
+        type = "error",
+        duration = 5
+      )
+    })
+  })
+  
+  # ===== Helper: Expand control selection with _ALL groups =====
+  expand_control_selection <- function(selected_controls, all_analytes) {
+    if (is.null(selected_controls) || length(selected_controls) == 0) {
+      return(character(0))
+    }
+    
+    expanded <- c()
+    for (ctrl in selected_controls) {
+      if (grepl("_ALL$", ctrl)) {
+        # This is a group selector, expand to all variants
+        base_name <- sub("_ALL$", "", ctrl)
+        variants <- grep(paste0("^", base_name, "_\\d+$"), all_analytes, value = TRUE)
+        expanded <- c(expanded, variants)
+      } else {
+        expanded <- c(expanded, ctrl)
+      }
+    }
+    
+    return(unique(expanded))
+  }
+  
+  # ===== Helper: Safe Join with Validation =====
+  safe_join <- function(df1, df2, by = NULL, join_type = "inner") {
+    # Validate inputs
+    if (is.null(df1) || is.null(df2)) {
+      stop("Cannot join: one or both data frames are NULL")
+    }
+    
+    if (nrow(df1) == 0 || nrow(df2) == 0) {
+      stop("Cannot join: one or both data frames are empty")
+    }
+    
+    # Check for common columns
+    if (is.null(by)) {
+      common_cols <- intersect(names(df1), names(df2))
+      if (length(common_cols) == 0) {
+        stop("Cannot join: no common columns found between data frames")
+      }
+      by <- common_cols[1]
+    }
+    
+    # Check that join column exists
+    if (!by %in% names(df1) || !by %in% names(df2)) {
+      stop(paste("Join column", by, "not found in both data frames"))
+    }
+    
+    # Perform join
+    if (join_type == "inner") {
+      result <- dplyr::inner_join(df1, df2, by = by)
+    } else if (join_type == "left") {
+      result <- dplyr::left_join(df1, df2, by = by)
+    } else {
+      stop("Invalid join_type. Use 'inner' or 'left'")
+    }
+    
+    return(result)
+  }
+  
+  # ===== UI Output: Negative Controls Summary =====
+  output$neg_controls_summary <- renderUI({
+    if (is.null(input$negative_controls) || length(input$negative_controls) == 0) {
+      return(NULL)
+    }
+    
+    num_selected <- length(input$negative_controls)
+    
+    # Get unique base names to show groups
+    base_names <- unique(sub("_\\d+$", "", input$negative_controls))
+    
+    tags$div(
+      style = "background: #e8f5e9; padding: 8px 12px; border-radius: 4px; border-left: 3px solid #4caf50; margin-top: 5px;",
+      tags$div(
+        style = "display: flex; align-items: center; justify-content: space-between;",
+        tags$span(
+          icon("check-circle", style = "color: #4caf50; margin-right: 5px;"),
+          tags$b(num_selected, " control(s) selected"),
+          style = "color: #2e7d32; font-size: 13px;"
+        ),
+        if (num_selected > 10) {
+          tags$small(
+            paste("Groups:", length(base_names)),
+            style = "color: #2e7d32;"
+          )
+        }
+      ),
+      if (num_selected <= 5) {
+        tags$div(
+          style = "color: #2e7d32; font-size: 12px; margin-top: 5px;",
+          paste(input$negative_controls, collapse = ", ")
+        )
+      } else {
+        tags$div(
+          style = "color: #2e7d32; font-size: 12px; margin-top: 5px;",
+          paste(head(input$negative_controls, 3), collapse = ", "),
+          " ... ",
+          paste(tail(input$negative_controls, 2), collapse = ", ")
+        )
+      }
+    )
+  })
+  
+  # ===== UI Output: Positive Controls Summary =====
+  output$pos_controls_summary <- renderUI({
+    if (is.null(input$positive_controls) || length(input$positive_controls) == 0) {
+      return(NULL)
+    }
+    
+    num_selected <- length(input$positive_controls)
+    
+    # Get unique base names to show groups
+    base_names <- unique(sub("_\\d+$", "", input$positive_controls))
+    
+    tags$div(
+      style = "background: #e3f2fd; padding: 8px 12px; border-radius: 4px; border-left: 3px solid #2196f3; margin-top: 5px;",
+      tags$div(
+        style = "display: flex; align-items: center; justify-content: space-between;",
+        tags$span(
+          icon("check-circle", style = "color: #2196f3; margin-right: 5px;"),
+          tags$b(num_selected, " control(s) selected"),
+          style = "color: #1565c0; font-size: 13px;"
+        ),
+        if (num_selected > 10) {
+          tags$small(
+            paste("Groups:", length(base_names)),
+            style = "color: #1565c0;"
+          )
+        }
+      ),
+      if (num_selected <= 5) {
+        tags$div(
+          style = "color: #1565c0; font-size: 12px; margin-top: 5px;",
+          paste(input$positive_controls, collapse = ", ")
+        )
+      } else {
+        tags$div(
+          style = "color: #1565c0; font-size: 12px; margin-top: 5px;",
+          paste(head(input$positive_controls, 3), collapse = ", "),
+          " ... ",
+          paste(tail(input$positive_controls, 2), collapse = ", ")
+        )
+      }
+    )
+  })
+  
+##### Preprocesado de datos ####
+  observeEvent(input$process_button, {
+    req(input$input_mode == "raw")
+    req(path1())
+    req(input$negative_controls)
+    
+    if (length(input$negative_controls) == 0) {
+      showNotification("Please select at least one negative control", type = "error")
+      return()
+    }
+    
+    # Expand control selections (handle _ALL groups)
+    neg_controls <- expand_control_selection(input$negative_controls, available_analytes())
+    pos_controls <- expand_control_selection(input$positive_controls, available_analytes())
+    
+    if (length(neg_controls) == 0) {
+      showNotification("No valid negative controls after expansion", type = "error")
+      return()
+    }
+    
+    files <- list.files(path = path1(), pattern = "\\.csv$", full.names = TRUE)
+    
+    withProgress(message = 'Processing files...', value = 0, {
+      # Get channel labels
+      ch_labels <- list(
+        ch1 = if (nchar(input$ch1_label) > 0) input$ch1_label else "IgE",
+        ch2 = if (nchar(input$ch2_label) > 0) input$ch2_label else "IgG4"
+      )
+      
+      regex_pattern <- if(nchar(input$neg_ctrl_regex) > 0) input$neg_ctrl_regex else NULL
+      
+      showNotification(
+        paste("Using", length(neg_controls), "negative controls:", 
+              paste(head(neg_controls, 3), collapse = ", "), 
+              if(length(neg_controls) > 3) "..." else ""),
+        type = "message",
+        duration = 5
+      )
+      
+      # Process with new dual-channel support
+      data <- process_microarray_batch(
+        files, 
+        input$normalization_method,
+        negative_controls = neg_controls,
+        negative_controls_pattern = regex_pattern,
+        channel_labels = ch_labels,
+        progress_callback = function(i, total, name) {
+          incProgress(1/total, detail = paste("Sample", name, "complete"))
+        }
+      )
+      
+
+      
+      # VALIDATE processed data before continuing
+      validation <- validate_expression_matrix(data, min_samples = 1, min_features = 1)
+      
+
+      
+      if (!validation$valid) {
+        showNotification(
+          paste("Processing failed:", validation$message),
+          type = "error",
+          duration = 10
+        )
+        return()
+      }
+      
+      # Apply inter-sample normalization if enabled
+      if (input$enable_inter_norm) {
+        if (input$inter_norm_method == "robust") {
+          data <- data %>%
+            mutate(across(where(is.numeric), ~scale(.x, center = TRUE, scale = TRUE)))
+        } else if (input$inter_norm_method == "center") {
+          data <- data %>%
+            mutate(across(where(is.numeric), ~(.x - mean(.x, na.rm = TRUE))))
+        } else if (input$inter_norm_method == "quantile") {
+          showNotification("Warning: Quantile normalization may alter distributions", type = "warning", duration = 5)
+          # Apply quantile normalization (requires preprocessCore)
+          if (requireNamespace("preprocessCore", quietly = TRUE)) {
+            mat <- as.matrix(data %>% select(where(is.numeric)))
+            mat_norm <- preprocessCore::normalize.quantiles(mat)
+            colnames(mat_norm) <- colnames(mat)
+            rownames(mat_norm) <- rownames(mat)
+            data[, colnames(mat_norm)] <- mat_norm
+          }
+        }
+      }
+      
+      processed_data(data)
+      
+      # Success notification
+      showNotification(
+        HTML(paste0(
+          "<strong>Processing Complete!</strong><br>",
+          "Samples: ", nrow(data), "<br>",
+          "Features: ", ncol(data) - 1, "<br>",
+          "Channels: ", ch_labels$ch1, ", ", ch_labels$ch2
+        )),
+        type = "message",
+        duration = 8
+      )
+    })
+  })
+  
+  # ===== Validate processed matrix upload =====
+  observeEvent(input$pep_fileinput, {
+    req(input$input_mode == "processed")
+    req(input$pep_fileinput)
+    
+    validation <- validate_processed_matrix(input$pep_fileinput$datapath)
+    
+    output$matrix_validation_status <- renderText({
+      validation$message
+    })
+    
+    if (validation$valid) {
+      ext <- tools::file_ext(input$pep_fileinput$datapath)
+      if (ext %in% c("xlsx", "xls")) {
+        data <- readxl::read_excel(input$pep_fileinput$datapath)
+      } else {
+        data <- read.csv(input$pep_fileinput$datapath)
+      }
+      processed_data(data)
+    }
+  })
+  
+  # ===== Clinical Database Upload with Advanced Options =====
+  observeEvent(input$db_fileinput, {
+    req(input$db_fileinput)
+    
+    ext <- tools::file_ext(input$db_fileinput$datapath)
+    
+    # Use advanced options if enabled
+    use_advanced <- !is.null(input$toggle_advanced_upload) && input$toggle_advanced_upload > 0
+    
+    if (ext %in% c("xlsx", "xls")) {
+      df <- readxl::read_excel(input$db_fileinput$datapath)
+    } else if (ext == "csv") {
+      # Apply advanced CSV options if available
+      if (use_advanced) {
+        df <- read.csv(
+          input$db_fileinput$datapath,
+          sep = if (!is.null(input$csv_separator)) input$csv_separator else ",",
+          header = if (!is.null(input$csv_header)) input$csv_header else TRUE,
+          fileEncoding = if (!is.null(input$csv_encoding)) input$csv_encoding else "UTF-8"
+        )
+      } else {
+        df <- read.csv(input$db_fileinput$datapath)
+      }
+    } else {
+      showNotification("Unsupported file format. Use .csv or .xlsx", type = "error")
+      return()
+    }
+
+    if (!is.null(df) && nrow(df) > 0) {
+      # Clean sample IDs: remove file extensions (.csv, .txt, etc.)
+      id_col <- if("id" %in% colnames(df)) "id" else colnames(df)[1]
+      df[[id_col]] <- gsub("\\.(csv|txt|xlsx|xls)$", "", df[[id_col]], ignore.case = TRUE)
+      
+      # Update column selectors
+      updateSelectInput(session, "sample_id_col", choices = colnames(df), 
+                       selected = if("id" %in% colnames(df)) "id" else colnames(df)[1])
+      updateSelectInput(session, "target_col", choices = colnames(df), 
+                       selected = if("Target" %in% colnames(df)) "Target" else colnames(df)[ncol(df)])
+      updateSelectInput(session, "replace_column", choices = colnames(df), 
+                       selected = colnames(df)[1])
+      
+      # Store original database
+      database(df)
+      database_edited(df)
+      
+      showNotification(
+        paste("Metadata loaded:", nrow(df), "samples,", ncol(df), "columns"),
+        type = "message",
+        duration = 3
+      )
+    } else {
+      showNotification("Error: Database is empty or could not be read", type = "error")
+    }
+  })
+  
+  # ===== Rename sample ID column to 'id' when user confirms selection =====
+  observeEvent(input$sample_id_col, {
+    req(database())
+    req(input$sample_id_col)
+    
+    df <- database()
+    
+    # Rename selected column to 'id' for consistent joins
+    if (input$sample_id_col %in% colnames(df) && input$sample_id_col != "id") {
+      df <- df %>%
+        dplyr::rename(id = !!rlang::sym(input$sample_id_col))
+      
+      database_edited(df)
+      
+      showNotification(
+        paste("Sample ID column '", input$sample_id_col, "' renamed to 'id' for analysis"),
+        type = "message",
+        duration = 3
+      )
+    } else if (input$sample_id_col == "id") {
+      # Already named 'id', just update database_edited
+      database_edited(df)
+    }
+  })
+  
+  # ===== Metadata Preview Table =====
+  output$metadata_table <- rhandsontable::renderRHandsontable({
+    req(database_edited())
+    rhandsontable::rhandsontable(database_edited(), height = 300, stretchH = "all") %>%
+      rhandsontable::hot_context_menu(allowRowEdit = FALSE, allowColEdit = FALSE)
+  })
+  
+  # ===== Find & Replace in Metadata =====
+  observeEvent(input$apply_find_replace, {
+    req(database_edited())
+    req(input$replace_column)
+    req(input$find_text)
+    
+    df <- database_edited()
+    col <- input$replace_column
+    find_text <- input$find_text
+    replace_text <- if (is.null(input$replace_text)) "" else input$replace_text
+    
+    if (col %in% colnames(df)) {
+      # Count matches
+      matches <- sum(grepl(find_text, df[[col]], fixed = TRUE))
+      
+      if (matches > 0) {
+        # Replace all occurrences
+        df[[col]] <- gsub(find_text, replace_text, df[[col]], fixed = TRUE)
+        database_edited(df)
+        
+        showNotification(
+          paste("Replaced", matches, "occurrence(s) in column:", col),
+          type = "message",
+          duration = 5
+        )
+      } else {
+        showNotification(
+          paste("No matches found for '", find_text, "' in column:", col),
+          type = "warning",
+          duration = 3
+        )
+      }
+    }
+  })
+  
+  # ===== Apply Metadata Edits =====
+  observeEvent(input$apply_metadata_edits, {
+    if (!is.null(input$metadata_table)) {
+      edited_df <- rhandsontable::hot_to_r(input$metadata_table)
+      database_edited(edited_df)
+      showNotification("Metadata changes applied", type = "message")
+    }
+  })
+  
+  # ===== Revert Metadata Edits =====
+  observeEvent(input$revert_metadata_edits, {
+    database_edited(database())
+    showNotification("Metadata reverted to original", type = "message")
   })
   
   
   ##### Descargar los datos en Excel ####
   output$download_button <- downloadHandler(
     filename = function() {
-      paste("normalized_data_", Sys.Date(), ".xlsx", sep = "")
+      paste("microarray_data_", Sys.Date(), ".xlsx", sep = "")
     },
     content = function(file) {
-      openxlsx::write.xlsx(processed_data(), file, rowNames = FALSE)
+      # Create workbook with multiple sheets
+      wb <- openxlsx::createWorkbook()
+      
+      # Sheet 1: Expression data
+      if (!is.null(processed_data())) {
+        openxlsx::addWorksheet(wb, "Expression_Data")
+        openxlsx::writeData(wb, "Expression_Data", processed_data())
+      }
+      
+      # Sheet 2: Clinical metadata (edited version if available)
+      if (!is.null(database_edited())) {
+        openxlsx::addWorksheet(wb, "Clinical_Metadata")
+        openxlsx::writeData(wb, "Clinical_Metadata", database_edited())
+      }
+      
+      # Sheet 3: Processing log
+      log_data <- data.frame(
+        Parameter = c("Processing Date", "Input Mode", "Normalization Method", 
+                     "Channel 1 Label", "Channel 2 Label", "Negative Controls", 
+                     "Inter-sample Normalization"),
+        Value = c(
+          as.character(Sys.Date()),
+          if (!is.null(input$input_mode)) input$input_mode else "N/A",
+          if (!is.null(input$normalization_method)) input$normalization_method else "N/A",
+          if (!is.null(input$ch1_label)) input$ch1_label else "IgE",
+          if (!is.null(input$ch2_label)) input$ch2_label else "IgG4",
+          if (!is.null(input$negative_controls)) paste(input$negative_controls, collapse = ", ") else "N/A",
+          if (!is.null(input$enable_inter_norm) && input$enable_inter_norm) 
+            input$inter_norm_method else "None"
+        )
+      )
+      openxlsx::addWorksheet(wb, "Processing_Log")
+      openxlsx::writeData(wb, "Processing_Log", log_data)
+      
+      openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
     }
   )
   
@@ -127,30 +757,59 @@ server <- function(input, output, session){
   output$density_plot <- renderPlot({
     req(processed_data())
     
-    data_long <- tidyr::pivot_longer(processed_data(), cols = -id, names_to = "ID", values_to = "MExpression")
+    # Validate before plotting
+    validation <- validate_expression_matrix(processed_data())
+    if (!validation$valid) {
+      return(NULL)
+    }
+    
+    data_long <- tidyr::pivot_longer(
+      processed_data(), 
+      cols = -id, 
+      names_to = "ID", 
+      values_to = "MExpression"
+    )
+    
+    # Filter non-finite values
+    data_long <- data_long %>%
+      dplyr::filter(is.finite(MExpression))
+    
+    # Check if any data remains
+    if (nrow(data_long) == 0) {
+      return(NULL)
+    }
     
     unique_ids <- unique(data_long$ID)
+    if (length(unique_ids) == 0) {
+      return(NULL)
+    }
+    
     selected_ids <- sample(unique_ids, size = min(20, length(unique_ids)))
     
     data_filtered <- data_long %>%
       dplyr::filter(ID %in% selected_ids)
     
+    # Final check
+    req(nrow(data_filtered) > 0)
+    
     ggplot(data_filtered, aes(x = MExpression, y = ID, fill = ID)) +
       ggridges::geom_density_ridges(scale = 1) +
       theme_microarrai() +
       scale_fill_viridis_d(option = "mako") + 
-      theme(legend.position = "none") +  # Eliminar la leyenda
-      labs(title = "Density Plot of Normalized Expression (20 Variables)", x = "Normalized Expression", y = "Variable (ID)")
+      theme(legend.position = "none") +
+      labs(title = "Density Plot of Normalized Expression (20 Variables)", 
+           x = "Normalized Expression", 
+           y = "Variable (ID)")
   })
   
   #### Fin preprocesado ####
   
   observeEvent(input$load_example_db, {
-    req(input$load_example_db)  # Asegura que el botón fue presionado
+    req(input$load_example_db)
     
-    num_patients <- 130  # Definir aquí si no es accesible globalmente
+    num_patients <- 130
     
-    # 🔹 Crear base de datos de ejemplo
+    # Crear base de datos de ejemplo
     example_db <- data.frame(
       id = paste0("Patient_", 1:num_patients),
       Age = sample(30:80, num_patients, replace = TRUE),
@@ -165,25 +824,16 @@ server <- function(input, output, session){
       Target = sample(c("Tratamiento 1", "Tratamiento 2", "Tratamiento 3"), num_patients, replace = TRUE)  
     )
     
-    # 🔹 Asegurar que la base de datos tiene datos antes de asignarla
     if (nrow(example_db) > 0) {
-      database(example_db)  # Asigna la base de datos reactiva
+      database(example_db)
+      database_edited(example_db)
+      
+      # Update column selectors
+      updateSelectInput(session, "sample_id_col", choices = colnames(example_db), selected = "id")
+      updateSelectInput(session, "target_col", choices = colnames(example_db), selected = "Target")
+      updateSelectInput(session, "replace_column", choices = colnames(example_db), selected = "Target")
     } else {
       stop("Error: No se pudo generar la base de datos de ejemplo.")
-    }
-  })
-  
-  observeEvent(input$db_fileinput, {
-    req(input$db_fileinput)
-    
-    database(NULL)
-    
-    df <- readxl::read_excel(input$db_fileinput$datapath)
-
-    if (!is.null(df) && nrow(df) > 0) {
-      database(df) 
-    } else {
-      stop("Error: Data base is empty.")
     }
   })
   
@@ -196,26 +846,69 @@ server <- function(input, output, session){
     }
   })
   
+  observeEvent(input$load_example_pep, {
+    req(input$load_example_pep)
+    
+    # Generate synthetic peptide data
+    example_pep <- generate_synthetic_peptide_data(
+      num_patients = 130,
+      num_peptides = 180,
+      num_markers = 15,
+      database = database()
+    )
+    
+    processed_data(example_pep)
+  })
   
 
-  ## Peptide tab
-  pepdata <- reactive({
-    file <- input$pep_fileinput
-    files <- list.files(path = path1(), pattern = "\\.csv$", full.names = TRUE)
+  # ===== Finish Preprocess Button: Switch to Peptide Tab =====
+  observeEvent(input$finish_preprocess, {
+    req(processed_data())
     
-    if (is.null(file) && length(files) == 0 && input$load_example_pep == 0) {
-      stop("Please upload a valid format.")
+    # Check that data is ready
+    if (is.null(processed_data()) || nrow(processed_data()) == 0) {
+      showNotification(
+        "No expression data available. Please process your data first.",
+        type = "error",
+        duration = 5
+      )
+      return()
     }
     
-    # Priority 1: Use processed microarray data
-    if (length(files) > 0 && !is.null(processed_data())) {
+    if (is.null(database_edited()) || nrow(database_edited()) == 0) {
+      showNotification(
+        "No clinical metadata available. Please upload clinical data.",
+        type = "warning",
+        duration = 5
+      )
+      return()
+    }
+    
+    # Success notification
+    showNotification(
+      HTML(paste0(
+        "<strong>Preprocessing Complete!</strong><br>",
+        "Samples: ", nrow(processed_data()), "<br>",
+        "Features: ", ncol(processed_data()) - 1, "<br>",
+        "<br>Switching to Peptide Analysis tab..."
+      )),
+      type = "message",
+      duration = 5
+    )
+    
+    # Switch to Peptide tab
+    updateTabsetPanel(session, inputId = NULL, selected = "Peptide")
+  })
+  
+  ## Peptide tab - Updated to use processed_data from both RAW and processed modes
+  pepdata <- reactive({
+    # Check if we have processed data from either mode
+    if (!is.null(processed_data())) {
       data <- processed_data()
+      
+
     } 
-    # Priority 2: Use uploaded Excel file
-    else if (!is.null(file)) {
-      data <- readxl::read_excel(file$datapath)
-    } 
-    # Priority 3: Generate synthetic example data
+    # Fallback: Generate synthetic example data
     else if (input$load_example_pep > 0) {
       data <- generate_synthetic_peptide_data(
         num_patients = 130,
@@ -224,21 +917,34 @@ server <- function(input, output, session){
         database = database()
       )
     } else {
-      stop("No valid data source found.")
+      return(NULL)
     }
 
-    # Clean column names and remove NA rows
+    # Clean column names for R compatibility
     colnames(data) <- make.names(colnames(data))
-    data <- na.omit(data)
+    
+    # FINAL STEP: Replace NA with 0 (filtered spots = no reliable signal)
+    # This happens AFTER all normalization calculations
+    data <- data %>%
+      dplyr::mutate(dplyr::across(where(is.numeric), ~tidyr::replace_na(.x, 0)))
     
     return(data)
   })
   
   output$data_status_pep <- renderText({
-    if (is.null(pepdata())) {
-      "No hay datos de péptidos cargados."
+    # Use processed_data for Step 6 preview, pepdata for Peptide tab
+    data_to_show <- if (!is.null(processed_data())) {
+      processed_data()
+    } else if (!is.null(pepdata())) {
+      pepdata()
     } else {
-      paste("Rows:", nrow(pepdata()), "Columns:", ncol(pepdata()))
+      NULL
+    }
+    
+    if (is.null(data_to_show)) {
+      "No expression data available."
+    } else {
+      paste("Rows:", nrow(data_to_show), "Columns:", ncol(data_to_show))
     }
   })
  
@@ -249,6 +955,24 @@ server <- function(input, output, session){
     
     # Convert to numeric matrix
     mat <- prepare_matrix(pepdata(), row_col = "id")
+    
+    # Check for non-finite values
+    if (!any(is.finite(mat))) {
+      plot.new()
+      text(0.5, 0.5, "No valid data for heatmap\n(all values are NA/Inf)", 
+           cex = 1.5, col = "white")
+      return(NULL)
+    }
+    
+    # Remove columns with all NA/Inf
+    valid_cols <- apply(mat, 2, function(x) any(is.finite(x)))
+    if (sum(valid_cols) == 0) {
+      plot.new()
+      text(0.5, 0.5, "No valid features for heatmap", cex = 1.5, col = "white")
+      return(NULL)
+    }
+    
+    mat <- mat[, valid_cols, drop = FALSE]
     
     # Limit to 300 features for performance
     mat_sampled <- sample_heatmap_features(mat, max_features = 300, seed = 123)
@@ -511,12 +1235,12 @@ server <- function(input, output, session){
 
   tests <- eventReactive(input$run_analysis_1, {
     req(input$analysis_type == "Comparison between groups (Classification)")  
-    req(pepdata(), database(), input$stats)  # Added input$stats validation
+    req(pepdata(), active_database(), input$stats)
     
     # Always use Linear Model-based differential analysis
     lm_results <- perform_lm_differential_analysis(
       peptide_data = pepdata(),
-      clinical_data = database(),
+      clinical_data = active_database(),
       target_variable = input$stats,
       test_method = "lm"  # Always LM as primary method
     )
@@ -525,7 +1249,7 @@ server <- function(input, output, session){
     if (!is.null(input$add_contrast_test) && input$add_contrast_test == TRUE) {
       contrast_results <- perform_lm_differential_analysis(
         peptide_data = pepdata(),
-        clinical_data = database(),
+        clinical_data = active_database(),
         target_variable = input$stats,
         test_method = input$contrast_method  # Will be "anova" or "kruskal"
       )
@@ -694,15 +1418,49 @@ server <- function(input, output, session){
   
   output$stats_plot <- renderGirafe({
     req(tests_filtered(), input$stats_plot_var)
+    
+    # Validate data availability
     peps <- pepdata()
-    tmp1 <- database()
-    meta <- peps %>% inner_join(tmp1)
+    tmp1 <- active_database()
+    
+    if (is.null(peps) || is.null(tmp1)) {
+      return(NULL)
+    }
+    
+    if (nrow(peps) == 0 || nrow(tmp1) == 0) {
+      return(NULL)
+    }
+    
+    # Safe join with validation
+    tryCatch({
+      meta <- safe_join(peps, tmp1, by = "id", join_type = "inner")
+    }, error = function(e) {
+      showNotification(
+        paste("Cannot create plot: sample IDs don't match between expression and clinical data. Error:", e$message),
+        type = "warning",
+        duration = 10
+      )
+      return(NULL)
+    })
+    
+    if (nrow(meta) == 0) {
+      showNotification("No matching samples between expression and clinical data", type = "warning")
+      return(NULL)
+    }
+    
     testt <- tests_filtered()
     df <- meta
     df <- df %>% rename(target = !!rlang::sym(input$stats)) %>% dplyr::select(id,target)
     df2 <- meta %>% dplyr::select(1:ncol(peps))
-    df3 <- df %>% inner_join(df2) %>% dplyr::select(-id) %>% 
+    df3 <- df %>% inner_join(df2, by = "id") %>% dplyr::select(-id) %>% 
       pivot_longer(names_to = "pep", values_to = "Expression", cols = -target)
+    
+    # Filter non-finite values
+    df3 <- df3 %>% dplyr::filter(is.finite(Expression))
+    
+    if (nrow(df3) == 0) {
+      return(NULL)
+    }
     
     # Validate that stats_plot_var exists in data
     if (!input$stats_plot_var %in% unique(df3$pep)) {
@@ -735,8 +1493,8 @@ server <- function(input, output, session){
                    outlier.size = 5) +
       labs(subtitle = input$stats_plot_var) +
       xlab("") +
-      stat_boxplot(geom = "errorbar", width = 0.2, alpha = .6) +
-      geom_violin(alpha = .1, lwd = 0.5, width = .6, alpha = .6) +
+      stat_boxplot(geom = "errorbar", width = 0.2, alpha = .2) +
+      geom_violin(lwd = 0.5, width = .6, alpha = .6) +
       theme_microarrai() +
       scale_color_microarrai() +
       scale_fill_microarrai()
@@ -748,18 +1506,42 @@ server <- function(input, output, session){
   reg_models <- eventReactive(input$run_analysis_1,{
     req(input$analysis_type == "Comparison between groups (Classification)")
     req(pepdata())  
-    req(database()) 
+    req(active_database())
     req(tests_filtered())
     
     testt <- tests_filtered() %>% as.data.frame()
     peps <- pepdata()
-    tmp1 <- database()
-    meta <- peps %>% inner_join(tmp1)
+    tmp1 <- active_database()
+    
+    # Safe join with validation
+    tryCatch({
+      meta <- safe_join(peps, tmp1, by = "id", join_type = "inner")
+    }, error = function(e) {
+      showNotification(
+        "Cannot run regression: sample IDs don't match between expression and clinical data",
+        type = "error"
+      )
+      return(NULL)
+    })
+    
+    if (is.null(meta) || nrow(meta) == 0) {
+      showNotification("No matching samples found", type = "error")
+      return(NULL)
+    }
+    
     df <- tmp1 %>% rename(target = !!rlang::sym(input$stats)) %>% dplyr::select(id,target)
     df2 <- meta %>% dplyr::select(1:ncol(peps))
-    df3 <- df %>% inner_join(df2) %>% dplyr::select(-id) %>% 
+    df3 <- df %>% inner_join(df2, by = "id") %>% dplyr::select(-id) %>% 
       mutate(target = as.factor(target)) %>% 
       pivot_longer(names_to = "pep", values_to = "Expression", cols = -target)
+    
+    # Filter non-finite values
+    df3 <- df3 %>% dplyr::filter(is.finite(Expression))
+    
+    if (nrow(df3) == 0) {
+      showNotification("No valid expression data after filtering", type = "error")
+      return(NULL)
+    }
     
     perfor <- data.frame()
     nlevels_target <- nlevels(as.factor(df3$target))
@@ -845,7 +1627,7 @@ server <- function(input, output, session){
   # Variable de agrupación (solo factores/char de la base clínica)
   output$volcano_group_var_ui <- renderUI({
     req(database())
-    db <- database()
+    db <- active_database()
     facs <- names(db)[vapply(db, function(x) is.factor(x) || is.character(x), logical(1))]
     facs <- setdiff(facs, "id")
     selectInput("volcano_group_var", dark_label("Contrast Variable:"), choices = facs)
@@ -866,13 +1648,13 @@ server <- function(input, output, session){
   
   # Tabla base para volcano (1 o 2 isotipos)
   volcano_tbl <- reactive({
-    req(pepdata(), database(),
+    req(pepdata(), active_database(),
         input$volcano_group_var, input$volcano_level_a, input$volcano_level_b)
     validate(need(input$volcano_level_a != input$volcano_level_b,
                   "Choose levels"))
     
     # merge pep + clínica y filtra contraste binario
-    dat <- dplyr::inner_join(pepdata(), database(), by = "id") %>%
+    dat <- dplyr::inner_join(pepdata(), active_database(), by = "id") %>%
       dplyr::filter(.data[[input$volcano_group_var]] %in% c(input$volcano_level_a, input$volcano_level_b)) %>%
       dplyr::mutate(.grp = factor(.data[[input$volcano_group_var]],
                                   levels = c(input$volcano_level_a, input$volcano_level_b)))
@@ -1077,13 +1859,13 @@ server <- function(input, output, session){
     req(tests_filtered(), input$stats_plot_var)
     
     peps <- pepdata()
-    tmp1 <- database()
-    meta <- peps %>% inner_join(tmp1)
+    tmp1 <- active_database()
+    meta <- peps %>% inner_join(tmp1, by = "id")
     testt <- tests_filtered()
     df <- meta
     df <- df %>% rename(target = !!rlang::sym(input$stats)) %>% dplyr::select(id,target)
     df2 <- meta %>% dplyr::select(1:ncol(peps))
-    df3 <- df %>% inner_join(df2) %>% dplyr::select(-id) %>% 
+    df3 <- df %>% inner_join(df2, by = "id") %>% dplyr::select(-id) %>% 
       pivot_longer(names_to = "pep", values_to = "Expression", cols = -target) %>% 
       mutate(target = as.factor(target))
     
@@ -1550,18 +2332,27 @@ server <- function(input, output, session){
   })
   
   meta_data_ML <- reactive({
-    req(active_pepdata(), database())
-    dplyr::inner_join(active_pepdata(), database())
+    req(active_pepdata(), active_database())
+    dplyr::inner_join(active_pepdata(), active_database(), by = "id")
   })
   
   ############################### Combined #####################################
   
   meta_data <- reactive({
     req(pepdata())
-    req(database())
+    req(active_database())
     tmp1 <- pepdata()
-    tmp2 <- database()
-    dplyr::inner_join(tmp1, tmp2)
+    tmp2 <- active_database()
+    
+    # DEBUG
+    cat("\n=== META_DATA JOIN DEBUG ===")
+    cat("\npepdata columns:", paste(head(colnames(tmp1), 10), collapse = ", "))
+    cat("\ndatabase columns:", paste(colnames(tmp2), collapse = ", "))
+    cat("\n'id' in pepdata:", "id" %in% colnames(tmp1))
+    cat("\n'id' in database:", "id" %in% colnames(tmp2))
+    cat("\n")
+    
+    dplyr::inner_join(tmp1, tmp2, by = "id")
   })
   
   
@@ -1732,7 +2523,7 @@ server <- function(input, output, session){
     
     p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = target, fill = target,
                              tooltip = tooltip, data_id = data_id)) +
-      geom_point_interactive(size = 3, alpha = 0.7) +  
+      geom_point_interactive(size = 4, alpha = 0.8) +  
       stat_ellipse(level = 0.95, alpha = 0.2) +  
       labs(
         x = paste0("PC1 (", var_pc1, "% Varianza)"),
@@ -1843,7 +2634,7 @@ server <- function(input, output, session){
     p <- positions %>%
       ggplot(aes(x = pcoa1, y = pcoa2, color = target, fill = target,
                  tooltip = tooltip, data_id = data_id)) +
-      geom_point_interactive(size = 3, alpha = 0.7) +
+      geom_point_interactive(size = 4, alpha = 0.8) +
       stat_ellipse(alpha = 0.2) +
       labs(
         title = "Principal Coordinates Analysis (PCoA)",
@@ -1908,7 +2699,7 @@ server <- function(input, output, session){
     
     p <- data %>% ggplot(aes(x= NMDS1, y= NMDS2, fill= target, color= target,
                               tooltip = tooltip, data_id = data_id)) +
-      geom_point_interactive()+
+      geom_point_interactive(size = 4, alpha = 0.8) +
       stat_ellipse()+
       theme_microarrai() +
       scale_color_microarrai() +
@@ -2008,7 +2799,7 @@ server <- function(input, output, session){
                                 shape = Cluster_Label,
                                 tooltip = tooltip, 
                                 data_id = data_id)) +
-      geom_point_interactive(size = 3.5, alpha = 0.8) +
+      geom_point_interactive(size = 4.5, alpha = 0.8) +
       scale_color_manual(values = group_colors) +
       scale_shape_manual(values = cluster_shapes) +
       labs(
@@ -2147,10 +2938,10 @@ server <- function(input, output, session){
     
     p <- ggplot(scores, aes(x = comp1, y = comp2, color = Group, fill = Group,
                              tooltip = tooltip, data_id = data_id)) +
-      geom_point_interactive(size = 3, alpha = 0.7) +
+      geom_point_interactive(size = 4, alpha = 0.8) +
       stat_ellipse(level = 0.95, alpha = 0.2) +
-      scale_color_manual(values = custom_palette) +
-      scale_fill_manual(values = custom_palette) +
+      scale_color_microarrai() +
+      scale_fill_microarrai() +
       labs(
         title = "PLS-DA Score Plot",
         x = paste0("Component 1 (", round(var_exp[1] * 100, 1), "%)"),

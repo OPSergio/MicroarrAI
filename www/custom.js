@@ -155,6 +155,46 @@ $(document).ready(function() {
     Shiny.setInputValue('peptide_nav_section', targetSection, {priority: "event"});
   });
   
+  // ===== PREPROCESS SIDEBAR =====
+  var preprocessSidebarOpen = false;
+  
+  // Preprocess Sidebar Toggle
+  $(document).on('click', '#preprocess-sidebar-toggle', function() {
+    preprocessSidebarOpen = !preprocessSidebarOpen;
+    
+    if (preprocessSidebarOpen) {
+      $('#preprocess-sidebar').addClass('open').css('left', '0');
+      $('.ml-content').css('margin-left', '320px');
+      $(this).addClass('sidebar-open');
+      $(this).html('<i class="fa fa-times"></i>');
+    } else {
+      $('#preprocess-sidebar').removeClass('open').css('left', '-320px');
+      $('.ml-content').css('margin-left', '0');
+      $(this).removeClass('sidebar-open');
+      $(this).html('<i class="fa fa-bars"></i>');
+    }
+  });
+  
+  // Preprocess Sidebar Navigation (SCROLL like ML)
+  $(document).on('click', '#preprocess-sidebar .ml-sidebar-item', function() {
+    var targetSection = $(this).data('target');
+    
+    // Update active state
+    $('#preprocess-sidebar .ml-sidebar-item').removeClass('active');
+    $(this).addClass('active');
+    
+    // Scroll to the section if it exists
+    var targetElement = $('#' + targetSection);
+    if (targetElement.length > 0) {
+      $('html, body').stop().animate({
+        scrollTop: targetElement.offset().top - 100
+      }, 200, 'easeInOutCubic');
+    }
+    
+    // Send to Shiny
+    Shiny.setInputValue('preprocess_nav_section', targetSection, {priority: "event"});
+  });
+  
   // ===== ACTIVE STATE STYLING =====
   $(document).on('mouseenter', '.ml-sidebar-item, .peptide-nav-item', function() {
     if (!$(this).hasClass('active')) {

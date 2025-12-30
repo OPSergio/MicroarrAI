@@ -6,31 +6,171 @@
 # Documentation: docs/data_processing.md
 # ============================================================================
 
+#' Detect GenePix Header Row
+#' 
+#' Automatically finds the header row in GenePix CSV files
+#'
+#' @param file_path Character. Full path to CSV file
+#' @return Integer. Row number where header starts (0-indexed for skip parameter)
+#' @details Searches for the row containing "Block" column header
+detect_genepix_header <- function(file_path) {
+  lines <- readLines(file_path, n = 100, warn = FALSE)
+  header_row <- which(grepl("Block", lines, ignore.case = TRUE))[1]
+  if (is.na(header_row)) {
+    warning("Could not detect GenePix header. Using default skip=60")
+    return(60)
+  }
+  return(header_row - 1)  # Return skip value
+}
+
+
+#' Clean Analyte IDs
+#' 
+#' Standardizes analyte identifiers for consistent downstream processing
+#'
+#' @param ids Character vector. Raw analyte IDs from microarray
+#' @return Character vector. Cleaned analyte IDs
+#' @details 
+#' - Trims whitespace
+#' - Replaces spaces with underscores
+#' - Removes special characters (except underscores and hyphens)
+#' - Ensures uniqueness by appending numbers to duplicates
+#' @examples
+#' clean_analyte_ids(c("PBS 1X", "p001 ", "p001"))
+clean_analyte_ids <- function(ids) {
+  # Trim whitespace
+  ids <- trimws(ids)
+  
+  # Replace spaces with underscores
+  ids <- gsub("\\s+", "_", ids)
+  
+  # Remove special characters except underscores and hyphens
+  ids <- gsub("[^[:alnum:]_-]", "", ids)
+  
+  # Remove specific unwanted substring
+  ids <- gsub("µgµL", "", ids)
+  
+  return(ids)
+}
+
+
 #' Read and Process Single Microarray File
 #' 
 #' Reads a CSV file from GenePix scanner, filters by quality flags,
-#' and calculates log2 expression ratios
+#' and calculates log2 expression ratios for both channels
 #'
 #' @param file_path Character. Full path to CSV file
-#' @param skip_rows Integer. Number of rows to skip (default: 60)
 #' @param flag_threshold Integer. Maximum flag value to keep (default: 4)
-#' @return Tibble with columns: ID, Expression
+#' @param auto_detect_header Logical. Auto-detect header row (default: TRUE)
+#' @param skip_rows Integer. Number of rows to skip if auto_detect=FALSE (default: 60)
+#' @return Tibble with columns: ID (cleaned), Expression_Ch1, Expression_Ch2
 #' @details 
-#' - Selects columns 7, 14-20 from GenePix output
-#' - Filters spots with Flags >= 4 (poor quality)
-#' - Calculates Expression = log2(Ch1.Median / Ch1.B.Median)
+#' - Auto-detects GenePix header row
+#' - Filters spots with Flags >= flag_threshold
+#' - Cleans analyte IDs
+#' - Calculates Expression_Ch1 = log2(Ch1.Median / Ch1.B.Median)
+#' - Calculates Expression_Ch2 = log2(Ch2.Median / Ch2.B.Median)
 #' @examples
 #' df <- read_microarray_file("sample001.csv")
-read_microarray_file <- function(file_path, skip_rows = 60, flag_threshold = 4) {
+read_microarray_file <- function(file_path, 
+                                 flag_threshold = 4, 
+                                 auto_detect_header = FALSE,
+                                 skip_rows = 60) {
+  
+  # Detect header if requested
+  if (auto_detect_header) {
+    skip_rows <- detect_genepix_header(file_path)
+  }
+  
+  # Read and process file
   df <- read.csv(file_path, skip = skip_rows, fileEncoding = 'latin1') %>%
-    dplyr::select(c(7, 14:20)) %>%
+    dplyr::select(
+      ID,
+      Flags,
+      matches("^Ch1\\.Median$"),
+      matches("^Ch1\\.B\\.Median$"),
+      matches("^Ch2\\.Median$"),
+      matches("^Ch2\\.B\\.Median$")
+    ) %>%
     dplyr::filter(Flags < flag_threshold) %>%
     dplyr::mutate(
-      Expression = log2(as.numeric(Ch1.Median) / as.numeric(Ch1.B.Median))
+      ID = clean_analyte_ids(ID),
+      Expression_Ch1 = log2(as.numeric(Ch1.Median) / as.numeric(Ch1.B.Median)),
+      Expression_Ch2 = log2(as.numeric(Ch2.Median) / as.numeric(Ch2.B.Median))
     ) %>%
-    dplyr::select(ID, Expression)
+    dplyr::select(ID, Expression_Ch1, Expression_Ch2)
   
   return(df)
+}
+
+
+#' Normalize Single Expression Vector
+#' 
+#' Applies normalization to a single expression vector (channel-independent)
+#'
+#' @param expression Numeric vector. Expression values
+#' @param ids Character vector. Analyte IDs matching expression vector
+#' @param method Character. One of: "Z-score", "Median Scaling"
+#' @param negative_controls Character vector. IDs of negative controls (required for Z-score)
+#' @return Numeric vector. Normalized expression values
+#' @details
+#' **Z-score normalization:**
+#' - Uses user-selected negative controls
+#' - Normalized = (Expression - median_controls) / mad_controls
+#' - Robust to outliers
+#' 
+#' **Median Scaling:**
+#' - Normalized = Expression / median(Expression)
+#' - Simple centering around median
+#' 
+#' @examples
+#' norm_expr <- normalize_channel(expr_vec, ids, "Z-score", c("PBS_1X", "Blank"))
+normalize_channel <- function(expression, ids, method = "Z-score", negative_controls = NULL) {
+  # Replace Inf/-Inf with NA (will be handled later)
+  expression[is.infinite(expression)] <- NA
+  
+  if (method == "Z-score") {
+    if (is.null(negative_controls) || length(negative_controls) == 0) {
+      stop("Z-score normalization requires negative_controls parameter")
+    }
+    
+    # Get control values
+    control_mask <- ids %in% negative_controls
+    if (sum(control_mask) == 0) {
+      stop("No negative controls found in data. Check control IDs.")
+    }
+    
+    control_vals <- expression[control_mask]
+    median_ctrl <- median(control_vals, na.rm = TRUE)
+    mad_ctrl <- mad(control_vals, na.rm = TRUE)
+    
+    # Fallback to SD if MAD is zero
+    if (mad_ctrl == 0 || is.na(mad_ctrl)) {
+      warning("MAD of controls is zero. Using standard deviation instead.")
+      mad_ctrl <- sd(control_vals, na.rm = TRUE)
+    }
+    
+    # Final check: if still zero or NA, cannot normalize
+    if (is.na(mad_ctrl) || mad_ctrl == 0) {
+      stop("Cannot normalize: negative controls have zero variance. Check your control selection.")
+    }
+    
+    normalized <- (expression - median_ctrl) / mad_ctrl
+    
+  } else if (method == "Median Scaling") {
+    median_expr <- median(expression, na.rm = TRUE)
+    
+    if (is.na(median_expr) || median_expr == 0) {
+      stop("Cannot apply Median Scaling: median expression is zero or NA")
+    }
+    
+    normalized <- expression / median_expr
+    
+  } else {
+    stop("Invalid normalization method. Use: 'Z-score' or 'Median Scaling'")
+  }
+  
+  return(normalized)
 }
 
 
@@ -40,11 +180,12 @@ read_microarray_file <- function(file_path, skip_rows = 60, flag_threshold = 4) 
 #'
 #' @param df Tibble with columns: ID, Expression
 #' @param method Character. One of: "Z-score", "Quantile", "Median Scaling"
+#' @param negative_controls Character vector. IDs of negative controls (default: "PBS_1X")
 #' @return Tibble with additional column: MExpression (normalized expression)
 #' @details
 #' **Z-score normalization:**
-#' - Uses PBS 1X as control
-#' - MExpression = (Expression - median_PBS) / mad_PBS
+#' - Uses user-selected negative controls
+#' - MExpression = (Expression - median_controls) / mad_controls
 #' - Robust to outliers (uses median + MAD instead of mean + SD)
 #' 
 #' **Quantile normalization:**
@@ -57,34 +198,26 @@ read_microarray_file <- function(file_path, skip_rows = 60, flag_threshold = 4) 
 #' 
 #' @examples
 #' df_norm <- normalize_expression(df, method = "Z-score")
-normalize_expression <- function(df, method = "Z-score") {
+normalize_expression <- function(df, method = "Z-score", negative_controls = c("PBS_1X")) {
   if (method == "Z-score") {
-    # Calculate PBS control statistics
-    df_PBS <- df %>%
-      dplyr::filter(ID == "PBS 1X") %>%
-      dplyr::summarize(
-        median_PBS = median(Expression),
-        mad_PBS = mad(Expression)
-      )
-    
-    # Apply Z-score normalization
-    df <- df %>%
-      dplyr::mutate(
-        MExpression = (Expression - df_PBS$median_PBS) / df_PBS$mad_PBS
-      )
-    
+    df$MExpression <- normalize_channel(
+      df$Expression, 
+      df$ID, 
+      method = "Z-score", 
+      negative_controls = negative_controls
+    )
   } else if (method == "Quantile") {
     # Quantile normalization
     df <- df %>%
       dplyr::mutate(
         MExpression = normalize.quantiles(as.matrix(df$Expression))
       )
-    
   } else if (method == "Median Scaling") {
-    # Median scaling
-    median_expr <- median(df$Expression)
-    df <- df %>%
-      dplyr::mutate(MExpression = Expression / median_expr)
+    df$MExpression <- normalize_channel(
+      df$Expression, 
+      df$ID, 
+      method = "Median Scaling"
+    )
   } else {
     stop("Invalid normalization method. Use: 'Z-score', 'Quantile', or 'Median Scaling'")
   }
@@ -93,43 +226,56 @@ normalize_expression <- function(df, method = "Z-score") {
 }
 
 
-#' Process Multiple Microarray Files
+#' Process Multiple Microarray Files (Dual-Channel Support)
 #' 
-#' Batch processes all CSV files in a directory with progress tracking
+#' Batch processes all CSV files with independent channel normalization
 #'
 #' @param file_paths Character vector. Paths to CSV files
 #' @param normalization_method Character. Normalization method to apply
+#' @param negative_controls Character vector. IDs of negative controls
+#' @param negative_controls_pattern Character. Regex pattern for negative controls (optional, overrides list)
+#' @param channel_labels List with ch1 and ch2 names (default: list(ch1="IgE", ch2="IgG4"))
 #' @param progress_callback Function. Optional callback for progress updates
-#' @return Tibble in wide format: id (sample name) + peptide columns
+#' @return Tibble in wide format: id + prefixed peptide columns (e.g., IgE_p001, IgG4_p001)
 #' @details
 #' Processing pipeline:
 #' 1. Read each file with read_microarray_file()
-#' 2. Apply normalization with normalize_expression()
+#' 2. Normalize Ch1 and Ch2 independently using negative controls
 #' 3. Combine all samples
-#' 4. Average technical replicates (same Sample + ID)
-#' 5. Pivot to wide format (samples as rows, peptides as columns)
-#' 6. Round to 2 decimals
-#' 7. Select only peptide columns (starts_with "p")
+#' 4. Remove negative controls (using pattern if provided, else exact match)
+#' 5. Average technical replicates (same Sample + ID)
+#' 6. Pivot to wide format with channel prefixes
+#' 7. Round to 2 decimals
 #' 
 #' @examples
 #' files <- list.files("data/", pattern = "\\.csv$", full.names = TRUE)
-#' data <- process_microarray_batch(files, "Z-score")
+#' data <- process_microarray_batch(files, "Z-score", c("PBS_1X", "Blank"))
 process_microarray_batch <- function(file_paths, 
                                      normalization_method = "Z-score",
+                                     negative_controls = c("PBS_1X"),
+                                     negative_controls_pattern = NULL,
+                                     channel_labels = list(ch1 = "IgE", ch2 = "IgG4"),
                                      progress_callback = NULL) {
   
   # Process each file
   data_list <- lapply(seq_along(file_paths), function(i) {
     file <- file_paths[i]
     
-    # Read and normalize
+    # Read file
     df <- read_microarray_file(file)
-    df <- normalize_expression(df, method = normalization_method)
     
-    # Add sample identifier
+    # Normalize each channel independently
     df <- df %>%
-      dplyr::select(ID, MExpression) %>%
-      dplyr::mutate(Sample = basename(file))
+      dplyr::mutate(
+        MExpression_Ch1 = normalize_channel(
+          Expression_Ch1, ID, normalization_method, negative_controls
+        ),
+        MExpression_Ch2 = normalize_channel(
+          Expression_Ch2, ID, normalization_method, negative_controls
+        ),
+        Sample = tools::file_path_sans_ext(basename(file))
+      ) %>%
+      dplyr::select(Sample, ID, MExpression_Ch1, MExpression_Ch2)
     
     # Update progress
     if (!is.null(progress_callback)) {
@@ -142,17 +288,58 @@ process_microarray_batch <- function(file_paths,
   # Combine all samples
   data <- dplyr::bind_rows(data_list)
   
+  # DEBUG: Check what we're filtering
+  # CRITICAL: Remove negative controls from final dataset
+  # They are used only for normalization, not for downstream analysis
+  if (!is.null(negative_controls_pattern)) {
+    data <- data %>%
+      dplyr::filter(!grepl(negative_controls_pattern, ID))
+  } else {
+    data <- data %>%
+      dplyr::filter(!ID %in% negative_controls)
+  }
+  
+  if (nrow(data) == 0) {
+    stop("No data remaining after removing negative controls. Check your data files.")
+  }
+  
   # Average technical replicates
   data <- data %>%
     dplyr::group_by(Sample, ID) %>%
-    dplyr::summarise(MExpression = mean(MExpression), .groups = "drop")
+    dplyr::summarise(
+      MExpression_Ch1 = mean(MExpression_Ch1, na.rm = TRUE),
+      MExpression_Ch2 = mean(MExpression_Ch2, na.rm = TRUE),
+      .groups = "drop"
+    )
   
-  # Convert to wide format
-  wider_data <- data %>%
-    dplyr::mutate(MExpression = round(MExpression, 2)) %>%
-    tidyr::pivot_wider(names_from = ID, values_from = MExpression) %>%
+  # Pivot to wide format for each channel
+  data_ch1 <- data %>%
+    dplyr::select(Sample, ID, MExpression_Ch1) %>%
+    tidyr::pivot_wider(
+      names_from = ID, 
+      values_from = MExpression_Ch1,
+      names_prefix = paste0(channel_labels$ch1, "_")
+    )
+  
+  data_ch2 <- data %>%
+    dplyr::select(Sample, ID, MExpression_Ch2) %>%
+    tidyr::pivot_wider(
+      names_from = ID, 
+      values_from = MExpression_Ch2,
+      names_prefix = paste0(channel_labels$ch2, "_")
+    )
+  
+  # Merge both channels
+  wider_data <- data_ch1 %>%
+    dplyr::left_join(data_ch2, by = "Sample") %>%
     dplyr::rename(id = Sample) %>%
-    dplyr::select(id, starts_with("p"))
+    dplyr::mutate(dplyr::across(where(is.numeric), ~round(.x, 2)))
+  
+  # Report NA count (will be replaced with 0 in pepdata() final step)
+  na_count_total <- sum(is.na(wider_data))
+  if (na_count_total > 0) {
+    message(sprintf("Note: %d NA values from filtered flags will be replaced with 0 in final output", na_count_total))
+  }
   
   return(wider_data)
 }
@@ -213,6 +400,169 @@ generate_synthetic_peptide_data <- function(num_patients = 130,
   }
   
   return(example_pep)
+}
+
+
+#' Get Unique Analyte IDs from RAW Files
+#' 
+#' Extracts and cleans unique analyte IDs from microarray files
+#'
+#' @param file_paths Character vector. Paths to CSV files
+#' @param group_similar Logical. If TRUE, groups similar IDs (default: TRUE)
+#' @return Character vector. Unique cleaned analyte IDs
+#' @details 
+#' Used to populate control selectors in UI.
+#' If group_similar=TRUE, analytes like PBS_1X_1, PBS_1X_2 are recognized
+#' as variants of the same control and can be selected together.
+#' @examples
+#' ids <- get_unique_analytes(list.files("data/", pattern = "\\.csv$", full.names = TRUE))
+get_unique_analytes <- function(file_paths, group_similar = TRUE) {
+  if (length(file_paths) == 0) {
+    return(character(0))
+  }
+  
+  # Read ALL files to get complete list of analytes
+  # (important: first file might not contain all variants)
+  all_ids <- character(0)
+  
+  for (file in file_paths) {
+    df <- read_microarray_file(file)
+    all_ids <- c(all_ids, unique(df$ID))
+  }
+  
+  # Get unique IDs across all files
+  unique_ids <- sort(unique(all_ids))
+  
+  # If grouping is enabled, add base names for similar analytes
+  if (group_similar) {
+    # Create a data frame with IDs and their base names
+    id_df <- data.frame(
+      id = unique_ids,
+      base = sub("_\\d+$", "", unique_ids),  # Remove trailing numbers
+      stringsAsFactors = FALSE
+    )
+    
+    # Find groups with multiple variants
+    group_counts <- table(id_df$base)
+    multi_variant_groups <- names(group_counts[group_counts > 1])
+    
+    # Add group markers to IDs that have variants
+    if (length(multi_variant_groups) > 0) {
+      for (base_name in multi_variant_groups) {
+        variants <- id_df$id[id_df$base == base_name]
+        # Sort variants naturally (ignore IDs without trailing numbers)
+        variant_nums <- suppressWarnings(as.numeric(gsub(".*_(\\d+)$", "\\1", variants)))
+        variants <- variants[order(variant_nums, na.last = NA)]
+        unique_ids <- c(unique_ids, paste0(base_name, "_ALL"))
+      }
+      unique_ids <- unique(unique_ids)
+    }
+  }
+  
+  return(unique_ids)
+}
+
+
+#' Validate Processed Matrix Input
+#' 
+#' Checks if uploaded file is a valid preprocessed matrix
+#'
+#' @param file_path Character. Path to uploaded file
+#' @return List with valid (logical) and message (character)
+#' @details
+#' Validates:
+#' - Has sample ID column
+#' - Has numeric feature columns
+#' - Has channel prefixes (e.g., IgE_, IgG4_) or generic features
+validate_processed_matrix <- function(file_path) {
+  tryCatch({
+    ext <- tools::file_ext(file_path)
+    
+    if (ext %in% c("xlsx", "xls")) {
+      df <- readxl::read_excel(file_path)
+    } else if (ext == "csv") {
+      df <- read.csv(file_path)
+    } else {
+      return(list(valid = FALSE, message = "Invalid file format. Use .csv or .xlsx"))
+    }
+    
+    # Check for ID column
+    if (!"id" %in% tolower(colnames(df))) {
+      return(list(valid = FALSE, message = "Missing 'id' column"))
+    }
+    
+    # Check for numeric columns
+    numeric_cols <- sapply(df[, -1], is.numeric)
+    if (sum(numeric_cols) == 0) {
+      return(list(valid = FALSE, message = "No numeric feature columns found"))
+    }
+    
+    return(list(
+      valid = TRUE, 
+      message = paste("Valid matrix:", nrow(df), "samples,", sum(numeric_cols), "features")
+    ))
+    
+  }, error = function(e) {
+    return(list(valid = FALSE, message = paste("Error reading file:", e$message)))
+  })
+}
+
+
+#' Validate Expression Matrix
+#' 
+#' Ensures expression matrix is valid before downstream processing
+#'
+#' @param df Tibble. Expression matrix with id column + numeric features
+#' @param min_samples Integer. Minimum number of samples required (default: 1)
+#' @param min_features Integer. Minimum number of features required (default: 1)
+#' @return List with valid (logical) and message (character)
+#' @details
+#' Checks:
+#' - Object is not NULL
+#' - Has at least min_samples rows
+#' - Has at least min_features numeric columns
+#' - Contains at least one finite value
+#' 
+#' @examples
+#' validation <- validate_expression_matrix(expr_data)
+#' if (!validation$valid) stop(validation$message)
+validate_expression_matrix <- function(df, min_samples = 1, min_features = 1) {
+  # Check NULL
+  if (is.null(df)) {
+    return(list(valid = FALSE, message = "Expression matrix is NULL"))
+  }
+  
+  # Check dimensions
+  if (nrow(df) < min_samples) {
+    return(list(
+      valid = FALSE, 
+      message = paste("Expression matrix has only", nrow(df), "samples. Minimum required:", min_samples)
+    ))
+  }
+  
+  # Check numeric columns
+  numeric_cols <- sapply(df, is.numeric)
+  n_numeric <- sum(numeric_cols)
+  
+  if (n_numeric < min_features) {
+    return(list(
+      valid = FALSE,
+      message = paste("Expression matrix has only", n_numeric, "numeric columns. Minimum required:", min_features)
+    ))
+  }
+  
+  # Check for finite values
+  numeric_data <- df[, numeric_cols, drop = FALSE]
+  has_finite <- any(sapply(numeric_data, function(x) any(is.finite(x))))
+  
+  if (!has_finite) {
+    return(list(
+      valid = FALSE,
+      message = "Expression matrix contains no finite values (all NA/Inf/NaN)"
+    ))
+  }
+  
+  return(list(valid = TRUE, message = "Expression matrix is valid"))
 }
 
 

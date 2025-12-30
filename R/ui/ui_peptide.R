@@ -152,7 +152,7 @@ ui_peptide <- function() {
       # Visualizations Row
       fluidRow(
         column(
-          6,
+          4,
           tags$h4("Positive Peptides by Isotype", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
           girafeOutput("isotype_donut", height = "300px"),
           tags$br(),
@@ -160,12 +160,12 @@ ui_peptide <- function() {
           DT::dataTableOutput("isotype_table")
         ),
         column(
-          6,
+          8,
           tags$h4("Expression Distribution by Isotype", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
-          girafeOutput("expression_dist_plot", height = "300px"),
+          girafeOutput("expression_dist_plot", height = "300px", width = "100%"),
           tags$br(),
           tags$h4("Top Samples by Positive Peptides", style = "color: #191c32; margin-bottom: 15px; margin-top: 20px; font-weight: bold;"),
-          DT::dataTableOutput("top_samples_table", height = "300px")
+          DT::dataTableOutput("top_samples_table", height = "300px", width = "100%")
         )
       )
     ),

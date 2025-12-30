@@ -1,0 +1,4 @@
+# Ignore documentation files
+/docs
+# Ignore R history files
+.Rhistory

@@ -31,6 +31,25 @@ body {
   margin-bottom: 40px;
 }
 
+/* ===== Selectize Controls Styling ===== */
+/* Limit height of selectize input when many items selected */
+.selectize-input {
+  max-height: 150px;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+}
+
+.selectize-input.has-items {
+  padding: 5px 8px !important;
+}
+
+/* Make selected items more compact */
+.selectize-input .item {
+  font-size: 12px;
+  padding: 3px 8px;
+  margin: 2px;
+}
+
 /* ===== Scroll Index & Sections ===== */
 .section {
   min-height: 100vh;

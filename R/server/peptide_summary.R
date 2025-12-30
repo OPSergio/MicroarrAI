@@ -245,5 +245,5 @@ create_expression_distribution_plot <- function(peptide_data) {
       strip.text = element_text(face = "bold", size = 11)
     )
   
-  apply_girafe(p, width_svg = 8, height_svg = 6)
+  apply_girafe(p, width_svg = 10, height_svg = 6)
 }

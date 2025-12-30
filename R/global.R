@@ -37,6 +37,7 @@ library(shinyjs)         # JavaScript integration
 library(shinythemes)     # Predefined themes for Shiny apps
 library(bslib)            # Modern UI components
 library(shinyFiles)       # File system browser widgets
+library(rhandsontable)    # Editable data tables
 # -----------------------------------------------------------------------------
 # Data Visualization - 2D
 # -----------------------------------------------------------------------------

@@ -1132,7 +1132,7 @@ create_decision_boundary_plot <- function(data, model_type, important_vars,
     # Actual data points (interactive)
     ggiraph::geom_point_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = data_id),
-      size = 3,
+      size = 4,
       alpha = 0.9
     ) +
     ggplot2::labs(title = plot_title) +

@@ -122,11 +122,14 @@ create_3d_scatter <- function(x, y, z, groups,
     surface = surface,
     ellipsoid = ellipsoid,
     surface.col = surface_col,
+    col = surface_col,
+    point.col = surface_col,
     axis.col = axis_col,
     xlab = xlab, 
     ylab = ylab, 
     zlab = zlab,
-    fit = fit
+    fit = fit,
+    sphere.size = 1.5
   )
   
   # Return rglwidget for Shiny

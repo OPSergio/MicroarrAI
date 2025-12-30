@@ -592,7 +592,34 @@ perform_lm_multigroup <- function(df_long) {
         if (!is.null(.x)) summary(.x)$r.squared else NA_real_
       })
     ) %>%
-    unnest(anova_result) %>%
+    tidyr::unnest(cols = anova_result)
+  
+  if (!"p.value" %in% colnames(results)) {
+    return(tibble::tibble(
+      peptide = character(),
+      method = character(),
+      p.value = numeric(),
+      p.adj = numeric(),
+      statistic = numeric(),
+      r.squared = numeric()
+    ))
+  }
+  
+  results <- results %>%
+    dplyr::filter(!is.na(p.value))
+  
+  if (nrow(results) == 0) {
+    return(tibble::tibble(
+      peptide = character(),
+      method = character(),
+      p.value = numeric(),
+      p.adj = numeric(),
+      statistic = numeric(),
+      r.squared = numeric()
+    ))
+  }
+  
+  results <- results %>%
     mutate(
       method = "Linear Model (ANOVA)",
       p.adj = p.adjust(p.value, method = "BH")
