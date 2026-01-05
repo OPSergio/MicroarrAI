@@ -108,6 +108,10 @@ source("R/server/visualization_3d.R", encoding = "UTF-8")
 
 # UI helper functions (card containers, section titles, etc.)
 source("R/utils/ui_helpers.R", encoding = "UTF-8")
+
+# 2D/3D Protein visualization (IgE/IgG4 separated)
+source("R/server/visualization_protein.R", encoding = "UTF-8")
+
 # =============================================================================
 # UI MODULES
 # =============================================================================
@@ -116,14 +120,11 @@ source("R/ui/ui_home.R", encoding = "UTF-8")           # Home page and intro
 source("R/ui/ui_preprocess.R", encoding = "UTF-8")    # Data preprocessing tab
 source("R/ui/ui_peptide.R", encoding = "UTF-8")       # Peptide analysis tab
 source("R/ui/ui_ml.R", encoding = "UTF-8")            # Machine Learning tab
-source("R/ui/ui_visualization.R", encoding = "UTF-8") # Visualization tab
+source("R/ui/ui_protein_viz.R", encoding = "UTF-8")   # Protein 2D/3D visualization tab
 
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
-
-# Custom ggplot2 themes and styling functions
-source("Def/Function2.R", encoding = "UTF-8")
 
 # Synthetic data generation for testing and demos
 source("Def/synthetic_data.R", encoding = "UTF-8")

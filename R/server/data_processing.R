@@ -234,6 +234,8 @@ normalize_expression <- function(df, method = "Z-score", negative_controls = c("
 #' @param normalization_method Character. Normalization method to apply
 #' @param negative_controls Character vector. IDs of negative controls
 #' @param negative_controls_pattern Character. Regex pattern for negative controls (optional, overrides list)
+#' @param positive_controls Character vector. IDs of positive controls (excluded from analysis)
+#' @param positive_controls_pattern Character. Regex pattern for positive controls (optional, overrides list)
 #' @param channel_labels List with ch1 and ch2 names (default: list(ch1="IgE", ch2="IgG4"))
 #' @param progress_callback Function. Optional callback for progress updates
 #' @return Tibble in wide format: id + prefixed peptide columns (e.g., IgE_p001, IgG4_p001)
@@ -243,9 +245,10 @@ normalize_expression <- function(df, method = "Z-score", negative_controls = c("
 #' 2. Normalize Ch1 and Ch2 independently using negative controls
 #' 3. Combine all samples
 #' 4. Remove negative controls (using pattern if provided, else exact match)
-#' 5. Average technical replicates (same Sample + ID)
-#' 6. Pivot to wide format with channel prefixes
-#' 7. Round to 2 decimals
+#' 5. Remove positive controls (excluded from ML analysis, used only for QA)
+#' 6. Average technical replicates (same Sample + ID)
+#' 7. Pivot to wide format with channel prefixes
+#' 8. Round to 2 decimals
 #' 
 #' @examples
 #' files <- list.files("data/", pattern = "\\.csv$", full.names = TRUE)
@@ -254,6 +257,8 @@ process_microarray_batch <- function(file_paths,
                                      normalization_method = "Z-score",
                                      negative_controls = c("PBS_1X"),
                                      negative_controls_pattern = NULL,
+                                     positive_controls = NULL,
+                                     positive_controls_pattern = NULL,
                                      channel_labels = list(ch1 = "IgE", ch2 = "IgG4"),
                                      progress_callback = NULL) {
   
@@ -301,6 +306,20 @@ process_microarray_batch <- function(file_paths,
   
   if (nrow(data) == 0) {
     stop("No data remaining after removing negative controls. Check your data files.")
+  }
+  
+  # CRITICAL: Remove positive controls from final dataset
+  # They are used only for QA, not for biomarker discovery
+  if (!is.null(positive_controls_pattern)) {
+    data <- data %>%
+      dplyr::filter(!grepl(positive_controls_pattern, ID))
+  } else if (!is.null(positive_controls) && length(positive_controls) > 0) {
+    data <- data %>%
+      dplyr::filter(!ID %in% positive_controls)
+  }
+  
+  if (nrow(data) == 0) {
+    stop("No data remaining after removing controls. Check your data files and control selection.")
   }
   
   # Average technical replicates

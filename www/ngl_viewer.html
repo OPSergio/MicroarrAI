@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>NGL Viewer - Proteínas AlphaFold</title>
+  <script src="https://cdn.jsdelivr.net/npm/ngl@2.0.0-dev.37/dist/ngl.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #viewport { width: 100vw; height: 100vh; }
+    #tooltip {
+      position: absolute;
+      background: rgba(0,0,0,0.85);
+      color: white;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      pointer-events: none;
+      display: none;
+      z-index: 10;
+    }
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%,-50%);
+      color: #666;
+      display: none;
+    }
+    .biomarker-badge {
+      background: #ff6b35;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      margin-left: 6px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+<div id="viewport"></div>
+<div id="tooltip"></div>
+<div id="loading">Cargando estructura…</div>
+
+<script>
+/* =======================
+   ESTADO GLOBAL
+======================= */
+const STATE = {
+  stage: null,
+  component: null,
+  biomarkerResidues: new Set(),
+  biomarkerReps: [],
+  currentUniprot: null,
+  tooltip: document.getElementById("tooltip"),
+  expressionData: {},
+  loading: document.getElementById("loading"),
+  hoverRep: null,
+  signalLength: 0,
+  mouseX: 0,
+  mouseY: 0,
+  cartoonRep: null,
+  surfaceRep: null,
+  currentColorScheme: null
+};
+
+/* =======================
+   INIT
+======================= */
+async function init() {
+  console.log("🚀 Inicializando NGL Viewer...");
+  STATE.stage = new NGL.Stage("viewport", {
+    backgroundColor: "white",
+    quality: "high",
+    tooltip: false
+  });
+
+  window.addEventListener("resize", () => STATE.stage.handleResize());
+  
+  // Rastrear posición del mouse UNA VEZ
+  document.addEventListener('mousemove', (e) => {
+    STATE.mouseX = e.clientX;
+    STATE.mouseY = e.clientY;
+  });
+  
+  // Configurar hover UNA VEZ - esto persiste entre cambios de proteína
+  setupHoverListener();
+
+  await loadStructure("P02663");
+  notifyShinyReady();
+}
+
+/* =======================
+   HOVER LISTENER (SE CONFIGURA UNA SOLA VEZ)
+======================= */
+function setupHoverListener() {
+  STATE.stage.signals.hovered.add(pick => {
+    if (pick?.atom) {
+      const r = pick.atom.residue;
+      const resno = r.resno;
+      const isBio = STATE.biomarkerResidues.has(resno);
+      
+      // Tooltip
+      const exprData = STATE.expressionData[String(resno)];
+      let exprHTML = '';
+      if (exprData && (exprData.H !== undefined || exprData.L !== undefined)) {
+        exprHTML = '<br><div style="margin-top: 4px; font-size: 11px;">';
+        if (exprData.H !== undefined && exprData.H !== null) {
+          exprHTML += `<div>High Risk: <strong>${exprData.H.toFixed(2)}</strong></div>`;
+        }
+        if (exprData.L !== undefined && exprData.L !== null) {
+          exprHTML += `<div>Low Risk: <strong>${exprData.L.toFixed(2)}</strong></div>`;
+        }
+        exprHTML += '</div>';
+      }
+
+      // Indicador de péptido señal en tooltip
+      const signalBadge = (STATE.signalLength > 0 && resno <= STATE.signalLength) ? 
+        '<span style="background:#4169E1;color:white;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:6px;">SIGNAL</span>' : '';
+
+      STATE.tooltip.innerHTML = `
+        <strong>${r.resname} ${resno}</strong> (${r.chainname})<br>
+        Átomo: ${pick.atom.atomname}
+        ${isBio ? '<span class="biomarker-badge">BIOMARKER</span>' : ''}
+        ${signalBadge}
+        ${exprHTML}
+      `;
+      STATE.tooltip.style.display = "block";
+      STATE.tooltip.style.left = (STATE.mouseX + 15) + "px";
+      STATE.tooltip.style.top = (STATE.mouseY + 15) + "px";
+      
+      // Enviar hover a 2D (AHORA 1:1, sin ajustes)
+      sendHoverTo2D(resno);
+      
+    } else {
+      // No hover
+      STATE.tooltip.style.display = "none";
+      sendHoverTo2D(null);
+    }
+  });
+  
+  console.log("✅ Hover listener configurado (persistente)");
+}
+
+/* =======================
+   ENVIAR HOVER A 2D
+======================= */
+function sendHoverTo2D(resno) {
+  if (resno === null || resno === undefined) {
+    console.log("🚫 Hover cleared, enviando null a 2D");
+    window.parent.postMessage({ type: "ngl-hover", pos: null }, "*");
+    return;
+  }
+  
+  // AHORA: Posiciones 1:1, simplemente enviamos la posición directamente
+  console.log(`📍 Hover 3D→2D: posición ${resno} (1:1)`);
+  
+  window.parent.postMessage({ 
+    type: "ngl-hover", 
+    pos: resno 
+  }, "*");
+}
+
+/* =======================
+   LOAD STRUCTURE
+======================= */
+async function loadStructure(uniprot) {
+  console.log("\n======================================");
+  console.log("🔄 CARGANDO ESTRUCTURA:", uniprot);
+  console.log("======================================");
+  
+  STATE.currentUniprot = uniprot;
+  STATE.loading.style.display = "block";
+
+  // Limpiar componente anterior
+  if (STATE.component) {
+    console.log("🧽 Limpiando componente anterior...");
+    STATE.stage.removeComponent(STATE.component);
+    STATE.component = null;
+    STATE.biomarkerReps = [];
+    STATE.biomarkerResidues.clear();
+    STATE.hoverRep = null;
+  }
+
+  const urls = [
+    `https://alphafold.ebi.ac.uk/files/AF-${uniprot}-F1-model_v6.pdb`,
+    `https://alphafold.ebi.ac.uk/files/AF-${uniprot}-F1-model_v4.pdb`
+  ];
+
+  for (const url of urls) {
+    try {
+      console.log("📥 Intentando cargar:", url);
+      STATE.component = await STATE.stage.loadFile(url, { defaultRepresentation: false });
+
+      // Cartoon base verde suave
+      STATE.cartoonRep = STATE.component.addRepresentation("cartoon", {
+        color: "#90EE90",
+        opacity: 0.7
+      });
+      
+      // Superficie semitransparente que seguirá el mismo esquema de color
+      STATE.surfaceRep = STATE.component.addRepresentation("surface", {
+        color: "#90EE90",
+        opacity: 0.15,
+        surfaceType: "sas",  // Solvent-accessible surface
+        lazy: true  // Carga progresiva
+      });
+
+      STATE.component.autoView();
+      STATE.loading.style.display = "none";
+      console.log("✅ ESTRUCTURA CARGADA EXITOSAMENTE");
+      console.log("======================================\n");
+      return;
+
+    } catch (e) {
+      console.warn("❌ Falló:", url, e.message);
+    }
+  }
+
+  alert("No se pudo cargar la estructura");
+  STATE.loading.style.display = "none";
+  console.error("❌ NO SE PUDO CARGAR NINGUNA ESTRUCTURA");
+  console.log("======================================\n");
+  throw new Error("No se pudo cargar la estructura");
+}
+
+/* =======================
+   HIGHLIGHT RESIDUES
+======================= */
+function highlightResidues(residues, signalLength) {
+  if (!STATE.component || !residues?.length) {
+    console.warn("⚠️ No se puede resaltar:", { component: !!STATE.component, residues });
+    return;
+  }
+
+  // Actualizar signal length
+  if (signalLength !== undefined) {
+    STATE.signalLength = signalLength;
+    console.log("📏 Péptido señal actualizado a:", STATE.signalLength);
+  }
+
+  console.log("⭐ Resaltando", residues.length, "residuos biomarcadores");
+
+  // Eliminar representaciones anteriores de biomarcadores
+  STATE.biomarkerReps.forEach(r => {
+    if (r !== STATE.hoverRep) {
+      STATE.component.removeRepresentation(r);
+    }
+  });
+  STATE.biomarkerReps = [];
+  STATE.biomarkerResidues.clear();
+  residues.forEach(r => STATE.biomarkerResidues.add(r));
+
+  const seleString = residues.map(r => `${r}`).join(" or ");
+  console.log("   Selección NGL:", seleString);
+
+  // Cartoon de biomarcadores (naranja intenso)
+  const biomarkerCartoon = STATE.component.addRepresentation("cartoon", {
+    sele: seleString,
+    color: "#ff6b35",
+    opacity: 1.0,
+    radiusScale: 1.8
+  });
+  
+  // Superficie de biomarcadores (más visible)
+  const biomarkerSurface = STATE.component.addRepresentation("surface", {
+    sele: seleString,
+    color: "#ff6b35",
+    opacity: 0.3,
+    surfaceType: "sas"
+  });
+  
+  // ✨ SORPRESA: Licorice sutil en biomarcadores para más detalle
+  const biomarkerLicorice = STATE.component.addRepresentation("licorice", {
+    sele: seleString,
+    color: "#cc5528",
+    opacity: 0.6,
+    radiusScale: 0.3
+  });
+
+  STATE.biomarkerReps.push(biomarkerCartoon, biomarkerSurface, biomarkerLicorice);
+  STATE.component.autoView(seleString, 1000);
+  console.log("✅ Biomarcadores resaltados (cartoon + surface + licorice)");
+}
+
+/* =======================
+   HOVER INDIVIDUAL (desde 2D)
+======================= */
+function highlightHoveredResidue(pos) {
+  if (!STATE.component) return;
+
+  console.log("🎯 Hover desde 2D→3D, posición:", pos);
+
+  // Eliminar highlight anterior
+  if (STATE.hoverRep) {
+    STATE.component.removeRepresentation(STATE.hoverRep);
+    STATE.hoverRep = null;
+  }
+
+  if (pos) {
+    console.log("   → Intentando resaltar posición:", pos);
+    console.log("   → Componente disponible:", !!STATE.component);
+    
+    // Ball+stick AMARILLO con escala grande
+    STATE.hoverRep = STATE.component.addRepresentation("ball+stick", {
+      sele: `${pos}`,
+      color: "#FFFF00",  // Amarillo brillante
+      aspectRatio: 2.5,
+      radiusScale: 1.2   // Más grande
+    });
+    
+    console.log("✨ Residuo resaltado con ball+stick amarillo");
+    console.log("   → Representación creada:", !!STATE.hoverRep);
+  }
+}
+
+/* =======================
+   COLOREAR POR EXPRESIÓN
+======================= */
+function colorByExpression(residueData, minExpr, maxExpr, colorScale = "green") {
+  if (!STATE.component) return;
+
+  console.log("🎨 Coloring by expression:");
+  console.log("   - Residues:", Object.keys(residueData).length);
+  console.log("   - Range:", minExpr, "→", maxExpr);
+  console.log("   - Color scale:", colorScale);
+
+  // Clear biomarkers
+  STATE.biomarkerReps.forEach(r => {
+    if (r !== STATE.hoverRep) {
+      STATE.component.removeRepresentation(r);
+    }
+  });
+  STATE.biomarkerReps = [];
+
+  function interpolateColor(value, min, max) {
+    const range = Math.max(Math.abs(min), Math.abs(max));
+    const normalized = value / range;
+    const clamped = Math.max(-1, Math.min(1, normalized));
+
+    // Green scale: white → green (for IgE)
+    if (colorScale === "green") {
+      if (clamped < 0) {
+        // Negative values: white
+        return 0xFFFFFF;
+      } else {
+        // Positive values: white → dark green (#00a86b)
+        const t = clamped;
+        const r = Math.round(255 * (1 - t * 0.996));  // 255 → 0
+        const g = Math.round(255 - t * (255 - 168));   // 255 → 168
+        const b = Math.round(255 * (1 - t * 0.581));  // 255 → 107
+        return (r << 16) | (g << 8) | b;
+      }
+    } 
+    // Red scale: white → red (for IgG4)
+    else {
+      if (clamped < 0) {
+        // Negative values: white
+        return 0xFFFFFF;
+      } else {
+        // Positive values: white → dark red (#d62828)
+        const t = clamped;
+        const r = Math.round(255 - t * (255 - 214));   // 255 → 214
+        const g = Math.round(255 * (1 - t * 0.844));  // 255 → 40
+        const b = Math.round(255 * (1 - t * 0.844));  // 255 → 40
+        return (r << 16) | (g << 8) | b;
+      }
+    }
+  }
+
+  const schemeId = NGL.ColormakerRegistry.addScheme(function(params) {
+    this.atomColor = function(atom) {
+      const resno = atom.residue.resno;
+      
+      // Signal peptide dark blue
+      if (STATE.signalLength > 0 && resno <= STATE.signalLength) {
+        return 0x7d898d;  // Grey-blue for signal
+      }
+      
+      const exprValue = residueData[String(resno)];
+      if (exprValue === undefined || exprValue === null) {
+        return 0xE0E0E0;  // Light grey for no data
+      }
+
+      return interpolateColor(exprValue, minExpr, maxExpr);
+    };
+  });
+
+  // Aplicar el esquema de color a cartoon y surface
+  STATE.component.reprList.forEach((rep) => {
+    if (rep.parameters.name === 'cartoon') {
+      rep.setColor(schemeId);
+      rep.setParameters({ opacity: 0.8 });
+    }
+    if (rep.parameters.name === 'surface') {
+      rep.setColor(schemeId);
+      rep.setParameters({ opacity: 0.2 });  // Surface más transparente
+    }
+  });
+  
+  STATE.currentColorScheme = schemeId;
+  console.log("✅ Coloreo completado (cartoon + surface)");
+}
+
+/* =======================
+   MARCAR PÉPTIDO SEÑAL
+======================= */
+function markSignalPeptide(signalResidues) {
+  if (!STATE.component || !signalResidues?.length) return;
+
+  console.log("🔵 Marcando péptido señal:", signalResidues.length, "residuos");
+
+  const seleString = signalResidues.map(r => `${r}`).join(" or ");
+
+  // Cartoon azul oscuro para péptido señal
+  STATE.component.addRepresentation("cartoon", {
+    sele: seleString,
+    color: "#00008B",  // Azul oscuro (DarkBlue)
+    opacity: 0.85,
+    radiusScale: 1.3
+  });
+  
+  // Surface también para péptido señal
+  STATE.component.addRepresentation("surface", {
+    sele: seleString,
+    color: "#00008B",  // Azul oscuro
+    opacity: 0.25,
+    surfaceType: "sas"
+  });
+
+  console.log("✅ Péptido señal marcado (azul fuerte + surface)");
+}
+
+/* =======================
+   COLOREAR POR POLARIDAD
+======================= */
+function colorByPolarity() {
+  if (!STATE.component) return;
+
+  console.log("🌈 Aplicando coloreo por polaridad de aminoácidos");
+
+  // Definir esquema de colores por polaridad
+  const schemeId = NGL.ColormakerRegistry.addScheme(function(params) {
+    this.atomColor = function(atom) {
+      const resno = atom.residue.resno;
+      const resname = atom.residue.resname;
+      
+      // Péptido señal azul OSCURO
+      if (STATE.signalLength > 0 && resno <= STATE.signalLength) {
+        return 0x00008B;  // Azul oscuro (DarkBlue)
+      }
+      
+      // Clasificación por polaridad
+      // No polares hidrofóbicos: Verde
+      if (['ALA', 'VAL', 'LEU', 'ILE', 'MET', 'PHE', 'TRP', 'PRO', 'GLY'].includes(resname)) {
+        return 0x228B22;  // Verde bosque
+      }
+      // Polares sin carga: Amarillo
+      if (['SER', 'THR', 'ASN', 'GLN', 'CYS', 'TYR'].includes(resname)) {
+        return 0xFFD700;  // Dorado
+      }
+      // Cargados positivos (básicos): Azul claro
+      if (['LYS', 'ARG', 'HIS'].includes(resname)) {
+        return 0x4169E1;  // Azul royal
+      }
+      // Cargados negativos (ácidos): Rojo
+      if (['ASP', 'GLU'].includes(resname)) {
+        return 0xDC143C;  // Rojo carmesí
+      }
+      
+      return 0xCCCCCC;  // Gris por defecto
+    };
+  });
+
+  // Limpiar biomarcadores
+  STATE.biomarkerReps.forEach(r => {
+    if (r !== STATE.hoverRep) {
+      STATE.component.removeRepresentation(r);
+    }
+  });
+  STATE.biomarkerReps = [];
+
+  // Aplicar a cartoon y surface
+  STATE.component.reprList.forEach((rep) => {
+    if (rep.parameters.name === 'cartoon') {
+      rep.setColor(schemeId);
+      rep.setParameters({ opacity: 0.8 });
+    }
+    if (rep.parameters.name === 'surface') {
+      rep.setColor(schemeId);
+      rep.setParameters({ opacity: 0.2 });
+    }
+  });
+  
+  STATE.currentColorScheme = schemeId;
+  console.log("✅ Coloreo por polaridad completado");
+  console.log("   🟢 Verde: Hidrofóbicos | 🟡 Amarillo: Polares");
+  console.log("   🔵 Azul: Básicos (+) | 🔴 Rojo: Ácidos (-)");
+}
+
+/* =======================
+   TOGGLE SUPERFICIE
+======================= */
+function toggleSurface(show) {
+  if (!STATE.component) return;
+
+  console.log("👁️ Toggle superficie:", show ? "MOSTRAR" : "OCULTAR");
+
+  STATE.component.reprList.forEach((rep) => {
+    if (rep.parameters.name === 'surface') {
+      rep.setVisibility(show);
+    }
+  });
+  
+  console.log("✅ Superficie", show ? "visible" : "oculta");
+}
+
+/* =======================
+   SHINY READY
+======================= */
+function notifyShinyReady() {
+  window.parent.postMessage({ type: "molstar-ready" }, "*");
+  console.log("📤 Notificado a Shiny: viewer listo");
+}
+
+/* =======================
+   MESSAGE HANDLER
+======================= */
+window.addEventListener("message", e => {
+  const d = e.data;
+  if (!d?.type) return;
+
+  console.log("📥 [NGL] Mensaje recibido:", d.type);
+
+  if (d.type === "load_structure") {
+    console.log("   → UniProt:", d.uniprot_id);
+    loadStructure(d.uniprot_id);
+  } else if (d.type === "highlight_biomarkers") {
+    console.log("   → Residuos:", d.residues?.length || 0);
+    console.log("   → Signal length:", d.signal_length);
+    highlightResidues(d.residues, d.signal_length);
+    if (d.expression_data) {
+      STATE.expressionData = d.expression_data;
+      console.log("📊 Datos de expresión guardados:", Object.keys(STATE.expressionData).length);
+    }
+  } else if (d.type === "hover_residue") {
+    console.log("   → Posición:", d.pos);
+    highlightHoveredResidue(d.pos);
+  } else if (d.type === "color_by_expression") {
+    console.log("   → Residues with data:", Object.keys(d.data || {}).length);
+    console.log("   → Color scale:", d.colorScale || "green");
+    colorByExpression(d.data, d.min, d.max, d.colorScale || "green");
+  } else if (d.type === "color_by_polarity") {
+    console.log("   → Aplicando coloreo por polaridad");
+    colorByPolarity();
+  } else if (d.type === "toggle_surface") {
+    console.log("   → Toggle superficie:", d.show);
+    toggleSurface(d.show);
+  } else if (d.type === "mark_signal") {
+    console.log("   → Residuos señal:", d.signal_residues?.length || 0);
+    markSignalPeptide(d.signal_residues);
+  }
+});
+
+// Exportar funciones (para debugging)
+window.STATE = STATE;
+window.loadStructure = loadStructure;
+window.highlightResidues = highlightResidues;
+window.highlightHoveredResidue = highlightHoveredResidue;
+window.colorByExpression = colorByExpression;
+window.colorByPolarity = colorByPolarity;
+window.toggleSurface = toggleSurface;
+window.markSignalPeptide = markSignalPeptide;
+
+init();
+</script>
+</body>
+</html>

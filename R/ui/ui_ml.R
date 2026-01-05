@@ -714,6 +714,34 @@ ui_ml <- function() {
               ),
               uiOutput("consensus_biomarkers_list")
             )
+          ),
+          
+          # Send Biomarkers to Protein Visualization
+          fluidRow(
+            column(12,
+              tags$div(
+                id = "ml_send_biomarkers_section",
+                style = "display: none; margin-top: 25px; text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);",
+                tags$h5(
+                  style = "color: white; margin-top: 0; font-weight: 600; font-size: 16px;",
+                  icon("dna", style = "margin-right: 10px;"),
+                  "Export Consensus Biomarkers"
+                ),
+                tags$p(
+                  "Send consensus features to Protein Visualization for detailed 2D/3D analysis",
+                  style = "color: rgba(255,255,255,0.9); font-size: 13px; margin-bottom: 18px;"
+                ),
+                actionButton(
+                  "ml_send_biomarkers_to_viz",
+                  tags$span(
+                    icon("paper-plane", style = "margin-right: 8px;"),
+                    "Send to Protein Visualization →"
+                  ),
+                  class = "btn-light",
+                  style = "font-size: 14px; padding: 12px 35px; font-weight: 600; background: white; color: #667eea; border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.2);"
+                )
+              )
+            )
           )
         )
       )

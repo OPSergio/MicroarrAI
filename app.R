@@ -54,8 +54,7 @@ ui <- fluidPage(
     ui_preprocess(),
     ui_peptide(),
     ui_ml(),
-    ui_2d_visualization(),
-    ui_3d_visualization()
+    ui_protein_viz()
   
   )# Cierre del body
 ) # Cierre del UI
@@ -474,12 +473,37 @@ output$normalization_method_description <- renderUI({
         duration = 5
       )
       
+      # Get positive controls
+      pos_controls <- if (!is.null(input$positive_controls) && length(input$positive_controls) > 0) {
+        input$positive_controls
+      } else {
+        NULL
+      }
+      
+      pos_regex_pattern <- if (!is.null(input$positive_controls_regex) && nchar(input$positive_controls_regex) > 0) {
+        input$positive_controls_regex
+      } else {
+        NULL
+      }
+      
+      if (!is.null(pos_controls) && length(pos_controls) > 0) {
+        showNotification(
+          paste("Excluding", length(pos_controls), "positive controls from ML analysis:", 
+                paste(head(pos_controls, 3), collapse = ", "), 
+                if(length(pos_controls) > 3) "..." else ""),
+          type = "message",
+          duration = 5
+        )
+      }
+      
       # Process with new dual-channel support
       data <- process_microarray_batch(
         files, 
         input$normalization_method,
         negative_controls = neg_controls,
         negative_controls_pattern = regex_pattern,
+        positive_controls = pos_controls,
+        positive_controls_pattern = pos_regex_pattern,
         channel_labels = ch_labels,
         progress_callback = function(i, total, name) {
           incProgress(1/total, detail = paste("Sample", name, "complete"))
@@ -1626,7 +1650,7 @@ output$normalization_method_description <- renderUI({
   
   # Variable de agrupación (solo factores/char de la base clínica)
   output$volcano_group_var_ui <- renderUI({
-    req(database())
+    req(active_database())
     db <- active_database()
     facs <- names(db)[vapply(db, function(x) is.factor(x) || is.character(x), logical(1))]
     facs <- setdiff(facs, "id")
@@ -1635,13 +1659,13 @@ output$normalization_method_description <- renderUI({
   
   # Niveles A y B (contraste binario)
   output$volcano_level_a_ui <- renderUI({
-    req(database(), input$volcano_group_var)
-    lv <- levels(as.factor(database()[[input$volcano_group_var]]))
+    req(active_database(), input$volcano_group_var)
+    lv <- levels(as.factor(active_database()[[input$volcano_group_var]]))
     selectInput("volcano_level_a", dark_label("Group A (numerator):"), choices = lv)
   })
   output$volcano_level_b_ui <- renderUI({
-    req(database(), input$volcano_group_var)
-    lv <- levels(as.factor(database()[[input$volcano_group_var]]))
+    req(active_database(), input$volcano_group_var)
+    lv <- levels(as.factor(active_database()[[input$volcano_group_var]]))
     sel <- if (length(lv) >= 2) lv[min(2, length(lv))] else lv[1]
     selectInput("volcano_level_b", dark_label("Group B (denominator):"), choices = lv, selected = sel)
   })
@@ -2329,6 +2353,12 @@ output$normalization_method_description <- renderUI({
     } else {
       p
     }
+  })
+  
+  # ====== Conjunto COMPLETO de péptidos para Protein Visualization (SIN filtrar) ===
+  full_pepdata <- reactive({
+    req(pepdata())
+    pepdata()  # Devuelve TODA la matriz sin filtrar
   })
   
   meta_data_ML <- reactive({
@@ -4080,6 +4110,98 @@ output$normalization_method_description <- renderUI({
     }
   })
   
+  # Send biomarkers from ML to protein visualization
+  observeEvent(input$ml_send_biomarkers_to_viz, {
+    message("\n========== [ML_EXPORT] Sending Biomarkers to Protein Viz ==========")
+    
+    # Get top N from slider
+    top_n <- if(!is.null(input$consensus_top_n)) input$consensus_top_n else 20
+    message("[ML_EXPORT] Top N threshold: ", top_n)
+    
+    # Build list dynamically based on selected models, limited to top_n
+    model_vars <- list()
+    
+    tryCatch({
+      if (!is.null(input$ml_use_c50) && input$ml_use_c50) {
+        all_vars <- variables_c5()
+        model_vars[["C5.0"]] <- head(all_vars, top_n)
+        message("[ML_EXPORT] C5.0: ", length(all_vars), " total, using top ", length(model_vars[["C5.0"]]))
+      }
+      
+      if (!is.null(input$ml_use_rf) && input$ml_use_rf) {
+        all_vars <- variables_rf()
+        model_vars[["Random Forest"]] <- head(all_vars, top_n)
+        message("[ML_EXPORT] RF: ", length(all_vars), " total, using top ", length(model_vars[["Random Forest"]]))
+      }
+      
+      if (!is.null(input$ml_use_svm) && input$ml_use_svm) {
+        all_vars <- variables_importantes_reactive()
+        model_vars[["SVM"]] <- head(all_vars, top_n)
+        message("[ML_EXPORT] SVM: ", length(all_vars), " total, using top ", length(model_vars[["SVM"]]))
+      }
+      
+      if (!is.null(input$ml_use_xgboost) && input$ml_use_xgboost) {
+        all_vars <- variables_xgb()
+        model_vars[["XGBoost"]] <- head(all_vars, top_n)
+        message("[ML_EXPORT] XGBoost: ", length(all_vars), " total, using top ", length(model_vars[["XGBoost"]]))
+      }
+    }, error = function(e) {
+      message("Error collecting features: ", e$message)
+    })
+    
+    # Need at least 2 models for consensus
+    if (length(model_vars) < 2) {
+      message("[ML_EXPORT] ERROR: Need at least 2 models, only ", length(model_vars), " selected")
+      showNotification(
+        "Need at least 2 models to calculate consensus biomarkers.",
+        type = "warning",
+        duration = 5
+      )
+      return()
+    }
+    
+    message("[ML_EXPORT] Models selected: ", paste(names(model_vars), collapse = ", "))
+    
+    # Find features in multiple models (consensus = in 2+ models)
+    all_features <- unique(unlist(model_vars))
+    message("[ML_EXPORT] Total unique features across models: ", length(all_features))
+    
+    feature_counts <- sapply(all_features, function(feat) {
+      sum(sapply(model_vars, function(vars) feat %in% vars))
+    })
+    
+    # Get consensus features (in 2+ models)
+    consensus_features <- names(feature_counts[feature_counts >= 2])
+    consensus_features <- consensus_features[order(-feature_counts[consensus_features])]
+    
+    message("[ML_EXPORT] Consensus features (2+ models): ", length(consensus_features))
+    if (length(consensus_features) > 0) {
+      message("[ML_EXPORT] Examples: ", paste(head(consensus_features, 5), collapse = ", "))
+    }
+    
+    if (length(consensus_features) == 0) {
+      message("[ML_EXPORT] ERROR: No consensus features found")
+      showNotification(
+        "No consensus biomarkers found. Features from different models do not overlap.",
+        type = "warning",
+        duration = 5
+      )
+      return()
+    }
+    
+    # Update selected_biomarkers with consensus features only
+    selected_biomarkers(consensus_features)
+    message("[ML_EXPORT] ✓ SUCCESS: Sent ", length(consensus_features), " consensus biomarkers")
+    message("[ML_EXPORT] Full list: ", paste(consensus_features, collapse = ", "))
+    message("========== [ML_EXPORT] Complete ==========")
+    
+    showNotification(
+      paste(length(consensus_features), "consensus biomarkers sent to Protein Visualization tab."),
+      type = "message",
+      duration = 5
+    )
+  })
+  
   # ============================================================================
   # MACHINE LEARNING - NEW PIPELINE SYSTEM
   # ============================================================================
@@ -4097,6 +4219,7 @@ output$normalization_method_description <- renderUI({
   shinyjs::hide("ml_svm_results")
   shinyjs::hide("ml_xgboost_results")
   shinyjs::hide("ml_venn_results")
+  shinyjs::hide("ml_send_biomarkers_section")
   
   # Unified target variable (new system uses ml_target_var, old uses PCA_target/h_target)
   active_target_var <- reactive({
@@ -4246,8 +4369,10 @@ output$normalization_method_description <- renderUI({
       # Show Venn diagram if more than one supervised method
       if (sum(c(input$ml_use_c50, input$ml_use_rf, input$ml_use_svm, input$ml_use_xgboost)) > 1) {
         shinyjs::show("ml_venn_results")
+        shinyjs::show("ml_send_biomarkers_section")  # Show export button with consensus
       } else {
         shinyjs::hide("ml_venn_results")
+        shinyjs::hide("ml_send_biomarkers_section")
       }
       
       # Step 4: Switch to appropriate tab
@@ -4300,107 +4425,21 @@ output$normalization_method_description <- renderUI({
   })
   
   #### 2D Represent Logic ####
-  
-  
-  fasta_data <- reactive({
-    req(input$fasta_file)
-    read_csv(input$fasta_file$datapath, col_names = FALSE, skip = 1)
-  })
-  
-  
-  bio_data <- reactive({
-    req(input$bio_file)
-    read_delim(input$bio_file$datapath, delim = "\t", escape_double = FALSE, 
-               col_names = FALSE, trim_ws = TRUE, skip = 1)
-  })
-  
-  
-  observeEvent(input$plot_btn, {
-    req(fasta_data(), bio_data())
-    
-   
-    P01003_fasta <- fasta_data()
-    
-    Ref.P01003 <- P01003_fasta %>%
-      separate_rows(X1, sep = "") %>%
-      filter(X1 != "") %>%
-      rename(AA_ref = X1) %>%
-      mutate(Pos = 1:nrow(.))
-    
-    
-    P01003 <- bio_data() %>%
-      select(X3, X4, X5) %>%
-      rename(Biochemical_info = X3, AA_Start = X4, AA_Finish = X5)
-    
-    
-    P01003.S <- P01003 %>% filter(Biochemical_info == "Disulfide bond") 
-    P01003.S1 <- P01003.S %>% select(Biochemical_info, AA_Start) %>% rename(Pos = AA_Start)
-    P01003.S2 <-  P01003.S %>% select(Biochemical_info, AA_Finish) %>% rename(Pos = AA_Finish)
-    P01003.S <- bind_rows(P01003.S1, P01003.S2)
-    
-    P01003.G <- P01003 %>% filter(Biochemical_info == "Glycosylation") %>%
-      select(Biochemical_info, AA_Start) %>%
-      rename(Pos = AA_Start)
-    
-    
-    Biochemical.P01003 <- bind_rows(P01003.S, P01003.G)
-    
-    
-    Protein <- Ref.P01003 %>% full_join(Biochemical.P01003) %>%
-      mutate(Representation = ifelse(Biochemical_info == "Disulfide bond", "S", "Ch"))
-    
- 
-    rep.pos <- posiciones(input$amino_count, input$chain_length, input$spacing, input$offset)
-    Protein <- bind_cols(Protein, rep.pos)
-  })
-  
-  # Output del gráfico (fuera del observeEvent)
-  output$protein_plot <- renderPlot({
-    req(fasta_data(), bio_data(), input$plot_btn)
-    
-    Ref.P01003 <- fasta_data() %>%
-      filter(X1 != "") %>%
-      rename(AA_ref = X1) %>%
-      mutate(Pos = 1:nrow(.))
-    
-    P01003 <- bio_data() %>%
-      select(X3, X4, X5) %>%
-      rename(Biochemical_info = X3, AA_Start = X4, AA_Finish = X5)
-    
-    P01003.S <- P01003 %>% filter(Biochemical_info == "Disulfide bond") 
-    P01003.S1 <- P01003.S %>% select(Biochemical_info, AA_Start) %>% rename(Pos = AA_Start)
-    P01003.S2 <-  P01003.S %>% select(Biochemical_info, AA_Finish) %>% rename(Pos = AA_Finish)
-    P01003.S <- bind_rows(P01003.S1, P01003.S2)
-    
-    P01003.G <- P01003 %>% filter(Biochemical_info == "Glycosylation") %>%
-      select(Biochemical_info, AA_Start) %>%
-      rename(Pos = AA_Start)
-    
-    Biochemical.P01003 <- bind_rows(P01003.S, P01003.G)
-    
-    Protein <- Ref.P01003 %>% full_join(Biochemical.P01003) %>%
-      mutate(Representation = ifelse(Biochemical_info == "Disulfide bond", "S", "Ch"))
-    
-    rep.pos <- posiciones(input$amino_count, input$chain_length, input$spacing, input$offset)
-    Protein <- bind_cols(Protein, rep.pos)
-    
-    Protein %>% ggplot(aes(x= x, y= y, label = AA_ref)) +
-      geom_point(size = 10, alpha= .3) +
-      geom_text(size = 4) +
-      ggrepel::geom_text_repel(aes(label= Representation, nudge_y = ifelse(y == max(y), y+1, y)),
-                               box.padding = 0.5,    
-                               point.padding = 0.3, 
-                               size = 4, 
-                               label.size = 0,
-                               segment.color = 'black', 
-                               nudge_x = 0.7,    
-                               fill = NA,        
-                               label.r = 0.2) +
-      theme_microarrai()
-  })
 
-  #### End 2D Represent ####
   
+  #### Protein 2D/3D Visualization ####
+  
+  server_protein_viz(
+    input = input,
+    output = output,
+    session = session,
+    clinical_data = reactive({ active_database() }),
+    peptide_data = reactive({ full_pepdata() }),  # ← MATRIZ COMPLETA, no filtrada
+    biomarkers = reactive({ selected_biomarkers() }),
+    target = active_target_var()  # Ya es un reactive, no envolver de nuevo
+  )
+  
+  #### End Protein Visualization ####
   
 }
 

@@ -230,5 +230,23 @@ $(document).ready(function() {
       'box-shadow': '0 4px 12px rgba(102, 126, 234, 0.3)'
     });
   });
+  
+  // Protein Visualization Sidebar Toggle
+  var proteinSidebarOpen = false;
+  $(document).on('click', '#protein-sidebar-toggle', function() {
+    proteinSidebarOpen = !proteinSidebarOpen;
+    
+    if (proteinSidebarOpen) {
+      $('#protein-sidebar').addClass('open').css('left', '0');
+      $('#protein-content').css('margin-left', '320px');
+      $(this).addClass('sidebar-open');
+      $(this).html('<i class="fa fa-times"></i>');
+    } else {
+      $('#protein-sidebar').removeClass('open').css('left', '-320px');
+      $('#protein-content').css('margin-left', '0');
+      $(this).removeClass('sidebar-open');
+      $(this).html('<i class="fa fa-bars"></i>');
+    }
+  });
 });
 
