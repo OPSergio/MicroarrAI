@@ -455,9 +455,9 @@ If you use MicroarrAI in your research, please cite:
 ```bibtex
 @software{microarrai2024,
   title = {MicroarrAI: Advanced Peptide Microarray Analysis Platform},
-  author = {MicroarrAI Team},
-  year = {2024},
-  url = {https://github.com/yourusername/MicroarrAI}
+  author = {Olmos-Piñero, Sergio},
+  year = {2025},
+  url = {https://github.com/OPSergio/MicroarrAI}
 }
 ```
 
