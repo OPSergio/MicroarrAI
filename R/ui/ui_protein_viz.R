@@ -31,14 +31,16 @@ ui_protein_viz <- function() {
           // ========== 2. Hover from NGL to ggiraph ==========
           if (event.data && event.data.type === 'ngl-hover') {
             var pos = event.data.pos;
-            console.log('🎯 Hover from NGL (position):', pos);
+            var target = event.data.target || 'ige';  // Default to IgE if not specified
+            console.log('🎯 Hover from NGL (' + target.toUpperCase() + ', position):', pos);
             
             if (window.Shiny) {
               Shiny.setInputValue('ngl_hovered_pos', pos, {priority: 'event'});
             }
             
-            // Highlight in SVG snake plot
-            var svg = document.querySelector('#protein_snake_ige svg');
+            // Highlight in corresponding SVG snake plot
+            var svgSelector = target === 'ige' ? '#protein_snake_ige svg' : '#protein_snake_igg4 svg';
+            var svg = document.querySelector(svgSelector);
             
             if (svg) {
               var prevHovered = svg.querySelectorAll('.hovered-from-ngl');
@@ -119,6 +121,7 @@ ui_protein_viz <- function() {
             }
             
             var analyte = index === 0 ? 'IgE' : 'IgG4';
+            var targetName = index === 0 ? 'ige' : 'igg4';
             console.log('✅ SVG ' + analyte + ' found, configuring listeners...');
             
             svg.addEventListener('mouseover', function(e) {
@@ -131,7 +134,8 @@ ui_protein_viz <- function() {
                   if (!isNaN(pos)) {
                     sendToMolstar({
                       type: 'hover_residue',
-                      pos: pos
+                      pos: pos,
+                      target: targetName
                     });
                   }
                   return;
@@ -145,7 +149,8 @@ ui_protein_viz <- function() {
                 console.log('🖱️ Hover out from ' + analyte);
                 sendToMolstar({
                   type: 'hover_residue',
-                  pos: null
+                  pos: null,
+                  target: targetName
                 });
               }
             });

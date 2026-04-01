@@ -38,6 +38,7 @@ library(shinythemes)     # Predefined themes for Shiny apps
 library(bslib)            # Modern UI components
 library(shinyFiles)       # File system browser widgets
 library(rhandsontable)    # Editable data tables
+library(markdown)         # Markdown to HTML conversion
 # -----------------------------------------------------------------------------
 # Data Visualization - 2D
 # -----------------------------------------------------------------------------
@@ -47,7 +48,6 @@ library(ggpubr)       # Publication-ready plots
 library(cowplot)      # Plot composition and themes
 library(ggrepel)      # Non-overlapping text labels
 library(ggvenn)       # Venn diagrams
-library(formattable)  # Styled and formatted tables
 library(ggiraph)      # Interactive ggplot2 graphics
 
 # -----------------------------------------------------------------------------
@@ -125,6 +125,7 @@ source("R/ui/ui_preprocess.R", encoding = "UTF-8")    # Data preprocessing tab
 source("R/ui/ui_peptide.R", encoding = "UTF-8")       # Peptide analysis tab
 source("R/ui/ui_ml.R", encoding = "UTF-8")            # Machine Learning tab
 source("R/ui/ui_protein_viz.R", encoding = "UTF-8")   # Protein 2D/3D visualization tab
+source("R/ui/ui_documentation.R", encoding = "UTF-8") # Documentation viewer tab
 
 # =============================================================================
 # HELPER FUNCTIONS

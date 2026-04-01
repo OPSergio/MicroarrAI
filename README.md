@@ -15,6 +15,8 @@ MicroarrAI is a comprehensive Shiny-based platform for peptide microarray data a
 - [Features](#-features)
 - [Architecture](#-architecture)
 - [Installation](#-installation)
+  - [Local Installation](#local-installation)
+  - [Docker Deployment](#-docker-deployment-recommended)
 - [Usage](#-usage)
 - [Module Documentation](#-module-documentation)
 - [Machine Learning Algorithms](#-machine-learning-algorithms)
@@ -118,14 +120,46 @@ MicroarrAI/
 
 ## Installation
 
-### Prerequisites
+### 🐳 Docker Deployment (Recommended)
+
+The easiest way to deploy MicroarrAI is using Docker. This method handles all dependencies automatically.
+
+**Quick Start:**
+
+```bash
+# Clone repository
+git clone https://github.com/yourusername/MicroarrAI.git
+cd MicroarrAI
+
+# Option 1: Using the deploy script (easiest)
+./deploy.sh
+
+# Option 2: Using docker-compose
+docker-compose up -d
+
+# Option 3: Using docker build directly
+docker build -t microarrai:latest .
+docker run -p 3838:3838 microarrai:latest
+```
+
+Access the application at `http://localhost:3838/MicroarrAI`
+
+**📘 For detailed Docker deployment instructions, see [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)**
+
+---
+
+### Local Installation
+
+For local development or if you prefer running without Docker:
+
+**Prerequisites:**
 
 ```r
 # R version 4.0 or higher
 R.version.string
 ```
 
-### Install Dependencies
+**Install Dependencies:**
 
 ```r
 # Core packages
@@ -156,7 +190,7 @@ install.packages(c(
 ))
 ```
 
-### Clone & Run
+**Clone & Run:**
 
 ```bash
 # Clone repository

@@ -51,6 +51,11 @@
 /* =======================
    ESTADO GLOBAL
 ======================= */
+// Get target from URL parameter (ige or igg4)
+const urlParams = new URLSearchParams(window.location.search);
+const TARGET = urlParams.get('target') || 'ige';
+console.log('🎯 NGL Viewer initialized for:', TARGET.toUpperCase());
+
 const STATE = {
   stage: null,
   component: null,
@@ -153,16 +158,21 @@ function setupHoverListener() {
 function sendHoverTo2D(resno) {
   if (resno === null || resno === undefined) {
     console.log("🚫 Hover cleared, enviando null a 2D");
-    window.parent.postMessage({ type: "ngl-hover", pos: null }, "*");
+    window.parent.postMessage({ 
+      type: "ngl-hover", 
+      pos: null,
+      target: TARGET
+    }, "*");
     return;
   }
   
   // AHORA: Posiciones 1:1, simplemente enviamos la posición directamente
-  console.log(`📍 Hover 3D→2D: posición ${resno} (1:1)`);
+  console.log(`📍 Hover 3D→2D (${TARGET.toUpperCase()}): posición ${resno} (1:1)`);
   
   window.parent.postMessage({ 
     type: "ngl-hover", 
-    pos: resno 
+    pos: resno,
+    target: TARGET
   }, "*");
 }
 
