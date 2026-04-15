@@ -1,0 +1,77 @@
+version: '3.8'
+
+# =============================================================================
+# MicroarrAI - Docker Compose Configuration
+# =============================================================================
+# Simplified deployment for MicroarrAI Shiny application
+# =============================================================================
+
+services:
+  microarrai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    image: microarrai:latest
+    
+    container_name: microarrai-app
+    
+    # Port mapping: host:container
+    ports:
+      - "3838:3838"
+    
+    # Environment variables (optional)
+    environment:
+      - SHINY_LOG_LEVEL=INFO
+      # - R_MAX_MEMORY=4G  # Adjust based on server resources
+    
+    # Volumes for persistent data and logs
+    volumes:
+      # Uncomment to persist uploaded data
+      # - ./data:/srv/shiny-server/MicroarrAI/data
+      
+      # Persist logs
+      - ./logs:/var/log/shiny-server
+      
+      # Optional: Mount custom config
+      # - ./shiny-server.conf:/etc/shiny-server/shiny-server.conf:ro
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (adjust based on server capacity)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3838/MicroarrAI"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# =============================================================================
+# USAGE
+# =============================================================================
+# Start the application:
+#   docker-compose up -d
+#
+# Stop the application:
+#   docker-compose down
+#
+# View logs:
+#   docker-compose logs -f
+#
+# Rebuild and restart:
+#   docker-compose up -d --build
+#
+# Access the app:
+#   http://your-server-ip:3838/MicroarrAI
+# =============================================================================

@@ -45,7 +45,6 @@ library(ggpubr)       # Publication-ready plots
 library(cowplot)      # Plot composition and themes
 library(ggrepel)      # Non-overlapping text labels
 library(ggvenn)       # Venn diagrams
-library(formattable)  # Styled and formatted tables
 library(ggiraph)      # Interactive ggplot2 graphics
 # -----------------------------------------------------------------------------
 # Data Visualization - 3D
