@@ -9,8 +9,8 @@ version: '3.8'
 services:
   microarrai:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     
     image: microarrai:latest
     
@@ -31,7 +31,7 @@ services:
       # - ./data:/srv/shiny-server/MicroarrAI/data
       
       # Persist logs
-      - ./logs:/var/log/shiny-server
+      - ../logs:/var/log/shiny-server
       
       # Optional: Mount custom config
       # - ./shiny-server.conf:/etc/shiny-server/shiny-server.conf:ro

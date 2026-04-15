@@ -1,140 +1,140 @@
-# MicroarrAI - Referencia Rápida Docker
+# MicroarrAI - Docker Quick Reference
 
-## 🚀 Comandos Esenciales
+## Essential Commands
 
-### Inicio Rápido
+### Quick Start
 
 ```bash
-# Método más fácil (interactivo)
+# Easiest method (interactive)
 ./deploy.sh
 
-# Método directo
+# Direct method
 docker-compose up -d
 ```
 
-Acceder: **http://localhost:3838/MicroarrAI**
+Access: **http://localhost:3838/MicroarrAI**
 
 ---
 
-## 📦 Gestión del Contenedor
+## Container Management
 
-### Construir e Iniciar
+### Build and Start
 
 ```bash
-# Primera vez - construir imagen
+# First time - build image
 docker-compose build
 
-# Iniciar en segundo plano
+# Start in background
 docker-compose up -d
 
-# Ver logs en tiempo real
+# View logs in real-time
 docker-compose logs -f
 
-# Iniciar y ver logs al mismo tiempo
+# Start and view logs at the same time
 docker-compose up
 ```
 
-### Detener y Reiniciar
+### Stop and Restart
 
 ```bash
-# Detener
+# Stop
 docker-compose down
 
-# Reiniciar
+# Restart
 docker-compose restart
 
-# Detener y eliminar volúmenes
+# Stop and remove volumes
 docker-compose down -v
 ```
 
-### Actualizar Aplicación
+### Update Application
 
 ```bash
-# Opción 1: Reconstruir todo
+# Option 1: Rebuild everything
 docker-compose down
 docker-compose build --no-cache
 docker-compose up -d
 
-# Opción 2: Solo reconstruir
+# Option 2: Only rebuild
 docker-compose up -d --build
 
-# Opción 3: Usar script
-./deploy.sh  # Opción 5
+# Option 3: Use script
+./deploy.sh  # Option 5
 ```
 
 ---
 
-## 🔍 Monitoreo y Debug
+## Monitoring and Debugging
 
-### Ver Logs
+### View Logs
 
 ```bash
-# Todos los logs
+# All logs
 docker-compose logs
 
-# Logs en tiempo real
+# Real-time logs
 docker-compose logs -f
 
-# Últimas 100 líneas
+# Last 100 lines
 docker-compose logs --tail=100
 
-# Logs de Docker específicos
+# Specific Docker logs
 docker logs microarrai-app
 
-# Logs de Shiny Server (si montaste volumen)
+# Shiny Server logs (if volume mounted)
 tail -f logs/microarrai-shiny-*.log
 ```
 
-### Estado del Sistema
+### System Status
 
 ```bash
-# Ver contenedores activos
+# View active containers
 docker-compose ps
 
-# Uso de recursos
+# Resource usage
 docker stats microarrai-app
 
-# Información detallada
+# Detailed information
 docker inspect microarrai-app
 
-# Ver procesos dentro del contenedor
+# View processes inside the container
 docker-compose top
 ```
 
-### Acceder al Contenedor
+### Access Container
 
 ```bash
-# Abrir shell interactiva
+# Open interactive shell
 docker-compose exec microarrai /bin/bash
 
-# Ejecutar comando R
+# Execute R command
 docker-compose exec microarrai R --version
 
-# Ver archivos de la app
+# View app files
 docker-compose exec microarrai ls -la /srv/shiny-server/MicroarrAI
 ```
 
 ---
 
-## ⚙️ Configuración
+## Configuration
 
-### Cambiar Puerto
+### Change Port
 
-Edita `docker-compose.yml`:
+Edit `docker-compose.yml`:
 ```yaml
 ports:
-  - "8080:3838"  # Cambia 8080 al puerto deseado
+  - "8080:3838"  # Change 8080 to the desired port
 ```
 
-Luego:
+Then:
 ```bash
 docker-compose down
 docker-compose up -d
 ```
 
-### Ajustar Recursos
+### Adjust Resources
 
-Edita `docker-compose.yml`:
+Edit `docker-compose.yml`:
 ```yaml
 deploy:
   resources:
@@ -143,91 +143,91 @@ deploy:
       memory: 16G
 ```
 
-### Variables de Entorno
+### Environment Variables
 
 ```bash
-# Copia el archivo de ejemplo
+# Copy the example file
 cp .env.example .env
 
-# Edita según necesites
+# Edit as needed
 nano .env
 
-# Aplica cambios
+# Apply changes
 docker-compose up -d
 ```
 
 ---
 
-## 🗄️ Persistencia de Datos
+## Data Persistence
 
-### Montar Directorio de Datos
+### Mount Data Directory
 
-Edita `docker-compose.yml` - descomenta:
+Edit `docker-compose.yml` - uncomment:
 ```yaml
 volumes:
   - ./data:/srv/shiny-server/MicroarrAI/data
 ```
 
 ```bash
-# Crear directorio
+# Create directory
 mkdir -p data
 
-# Reiniciar
+# Restart
 docker-compose down
 docker-compose up -d
 ```
 
-### Backup de Datos
+### Data Backup
 
 ```bash
-# Copiar datos desde el contenedor
+# Copy data from the container
 docker cp microarrai-app:/srv/shiny-server/MicroarrAI/data ./backup
 
-# Restaurar datos
+# Restore data
 docker cp ./backup microarrai-app:/srv/shiny-server/MicroarrAI/data
 ```
 
 ---
 
-## 🧹 Limpieza
+## Cleanup
 
-### Limpieza Básica
+### Basic Cleanup
 
 ```bash
-# Detener y eliminar contenedor
+# Stop and remove container
 docker-compose down
 
-# Eliminar imagen
+# Remove image
 docker rmi microarrai:latest
 ```
 
-### Limpieza Profunda
+### Deep Cleanup
 
 ```bash
-# Detener todo
+# Stop everything
 docker-compose down -v
 
-# Eliminar imagen
+# Remove image
 docker rmi microarrai:latest
 
-# Limpiar recursos no usados de Docker
+# Clean unused Docker resources
 docker system prune -a
 
-# Limpiar volúmenes huérfanos
+# Clean orphan volumes
 docker volume prune
 ```
 
 ---
 
-## 🔒 Producción
+## Production
 
-### Ejecutar con Nginx (Reverse Proxy)
+### Run with Nginx (Reverse Proxy)
 
 ```nginx
 # /etc/nginx/sites-available/microarrai
 server {
     listen 80;
-    server_name tu-dominio.com;
+    server_name your-domain.com;
 
     location / {
         proxy_pass http://localhost:3838/MicroarrAI/;
@@ -243,22 +243,22 @@ server {
 ```
 
 ```bash
-# Activar configuración
+# Activate configuration
 sudo ln -s /etc/nginx/sites-available/microarrai /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-### HTTPS con Certbot
+### HTTPS with Certbot
 
 ```bash
-sudo certbot --nginx -d tu-dominio.com
+sudo certbot --nginx -d your-domain.com
 ```
 
-### Configurar como Servicio Systemd
+### Configure as Systemd Service
 
 ```bash
-# Crear archivo de servicio
+# Create service file
 sudo nano /etc/systemd/system/microarrai.service
 ```
 
@@ -281,7 +281,7 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-# Activar servicio
+# Activate service
 sudo systemctl enable microarrai
 sudo systemctl start microarrai
 sudo systemctl status microarrai
@@ -289,15 +289,15 @@ sudo systemctl status microarrai
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-### Contenedor no inicia
+### Container does not start
 
 ```bash
-# Ver logs de error
+# View error logs
 docker-compose logs
 
-# Ver eventos de Docker
+# View Docker events
 docker events
 
 # Verificar configuración
