@@ -140,8 +140,8 @@ RUN chown -R shiny:shiny /srv/shiny-server/MicroarrAI
 # =============================================================================
 
 # Copy custom Shiny Server configuration (optional)
-# Context is the repo root, so shiny-server.conf is found at the root.
-# COPY shiny-server.conf /etc/shiny-server/shiny-server.conf
+# Context is the repo root; shiny-server.conf lives in docker/.
+# COPY docker/shiny-server.conf /etc/shiny-server/shiny-server.conf
 
 # Expose port 3838 (default Shiny Server port)
 EXPOSE 3838

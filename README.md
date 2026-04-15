@@ -14,9 +14,7 @@ MicroarrAI is a comprehensive Shiny-based platform for peptide microarray data a
 
 - [Features](#-features)
 - [Architecture](#-architecture)
-- [Installation](#-installation)
-  - [Local Installation](#local-installation)
-  - [Docker Deployment](#-docker-deployment-recommended)
+- [Installation](#installation)
 - [Usage](#-usage)
 - [Module Documentation](#-module-documentation)
 - [Machine Learning Algorithms](#-machine-learning-algorithms)
@@ -120,86 +118,24 @@ MicroarrAI/
 
 ## Installation
 
-### 🐳 Docker Deployment (Recommended)
-
-The easiest way to deploy MicroarrAI is using Docker. This method handles all dependencies automatically.
-
-**Quick Start:**
+Docker and Singularity/Apptainer deployments are supported. Use `deploy.sh` to choose at runtime:
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/MicroarrAI.git
+git clone https://github.com/OPSergio/MicroarrAI.git
 cd MicroarrAI
-
-# Option 1: Using the deploy script (easiest)
+chmod +x deploy.sh docker/docker-deploy.sh singularity/singularity-deploy.sh
 ./deploy.sh
-
-# Option 2: Using docker-compose
-docker-compose up -d
-
-# Option 3: Using docker build directly
-docker build -t microarrai:latest .
-docker run -p 3838:3838 microarrai:latest
 ```
 
-Access the application at `http://localhost:3838/MicroarrAI`
+See [INSTALLATION.md](INSTALLATION.md) for full instructions covering both deployment methods, resource requirements, and troubleshooting.
 
-**📘 For detailed Docker deployment instructions, see [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)**
-
----
-
-### Local Installation
-
-For local development or if you prefer running without Docker:
-
-**Prerequisites:**
-
-```r
-# R version 4.0 or higher
-R.version.string
-```
-
-**Install Dependencies:**
-
-```r
-# Core packages
-install.packages(c(
-  "shiny", "shinydashboard", "shinyWidgets", "shinyBS",
-  "DT", "plotly", "ggplot2", "tidyverse", "dplyr", "tidyr"
-))
-
-# Machine Learning
-install.packages(c(
-  "C50", "randomForest", "e1071", "caret", "xgboost",
-  "shapviz", "vegan", "FactoMineR"
-))
-
-# Statistical Analysis
-install.packages(c(
-  "stats", "agricolae", "multcomp", "pROC"
-))
-
-# Visualization
-install.packages(c(
-  "rgl", "car", "ggrepel", "ggvenn", "pheatmap", "RColorBrewer"
-))
-
-# Regression (tidymodels)
-install.packages(c(
-  "parsnip", "yardstick", "tidymodels"
-))
-```
-
-**Clone & Run:**
+### Local (no container)
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/MicroarrAI.git
-cd MicroarrAI
-
-# Run application
 Rscript -e "shiny::runApp()"
 ```
+
+Requires R ≥ 4.0 with all packages listed in `docker/Dockerfile` installed.
 
 ---
 

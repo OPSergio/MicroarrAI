@@ -202,41 +202,41 @@ start_app() {
 stop_app() {
     echo ""
     if ! is_running; then
-        print_warn "No hay ninguna instancia '$INSTANCE_NAME' en ejecución."
+        print_warn "No instance '$INSTANCE_NAME' is running."
         return 0
     fi
 
-    print_info "Deteniendo instancia '$INSTANCE_NAME'..."
+    print_info "Stopping instance '$INSTANCE_NAME'..."
     ${SINGULARITY_CMD} instance stop "$INSTANCE_NAME"
-    print_success "Instancia detenida."
+    print_success "Instance stopped."
 }
 
 show_logs() {
     echo ""
     if [ ! -d "$LOGS_DIR" ] || [ -z "$(ls -A "$LOGS_DIR" 2>/dev/null)" ]; then
-        print_warn "No hay archivos de log en $LOGS_DIR"
-        print_info "Inicia la aplicación primero (opción 2) con logs montados."
+        print_warn "No log files found in $LOGS_DIR"
+        print_info "Start the application first (option 2) with logs mounted."
         return 0
     fi
 
-    print_info "Mostrando logs en tiempo real (Ctrl+C para salir)..."
+    print_info "Streaming logs (Ctrl+C to exit)..."
     echo ""
     tail -f "${LOGS_DIR}"/*.log
 }
 
 rebuild_app() {
     echo ""
-    print_warn "Esto reconstruirá la imagen desde cero (sin caché). Puede tardar 15-30 minutos."
-    read -r -p "¿Continuar? [s/N] " confirm
-    if [[ ! "$confirm" =~ ^[sS]$ ]]; then
-        echo "Cancelado."
+    print_warn "This will rebuild the image from scratch (no cache). May take 15-30 minutes."
+    read -r -p "Continue? [y/N] " confirm
+    if [[ ! "$confirm" =~ ^[yY]$ ]]; then
+        echo "Cancelled."
         return 0
     fi
 
     stop_app
 
     if [ -f "$SIF_FILE" ]; then
-        print_info "Eliminando imagen anterior: $SIF_FILE"
+        print_info "Removing previous image: $SIF_FILE"
         rm -f "$SIF_FILE"
     fi
 
@@ -246,35 +246,34 @@ rebuild_app() {
 
 show_status() {
     echo ""
-    print_info "Estado de instancias Singularity:"
+    print_info "Singularity instances:"
     echo ""
-    ${SINGULARITY_CMD} instance list 2>/dev/null || echo "(ninguna instancia activa)"
+    ${SINGULARITY_CMD} instance list 2>/dev/null || echo "(no active instances)"
 
     echo ""
     if is_running; then
-        print_success "Instancia '$INSTANCE_NAME': ACTIVA"
+        print_success "Instance '$INSTANCE_NAME': RUNNING"
         echo ""
-        # Health check
-        print_info "Comprobando salud de la aplicación..."
+        print_info "Checking application health..."
         if curl -sf "http://localhost:${PORT}/MicroarrAI" &>/dev/null; then
-            print_success "Shiny Server responde en http://localhost:${PORT}/MicroarrAI"
+            print_success "Shiny Server responding at http://localhost:${PORT}/MicroarrAI"
         else
-            print_warn "Shiny Server no responde todavía (puede estar iniciando)"
+            print_warn "Shiny Server not responding yet (may still be starting)"
         fi
     else
-        print_warn "Instancia '$INSTANCE_NAME': INACTIVA"
+        print_warn "Instance '$INSTANCE_NAME': STOPPED"
     fi
 
     if [ -f "$SIF_FILE" ]; then
         echo ""
         SIF_SIZE=$(du -sh "$SIF_FILE" | cut -f1)
-        print_info "Imagen: $SIF_FILE ($SIF_SIZE)"
+        print_info "Image: $SIF_FILE ($SIF_SIZE)"
     fi
 
     if [ -d "$LOGS_DIR" ]; then
         echo ""
-        print_info "Archivos de log:"
-        ls -lh "${LOGS_DIR}"/*.log 2>/dev/null | awk '{print "  " $0}' || echo "  (sin logs todavía)"
+        print_info "Log files:"
+        ls -lh "${LOGS_DIR}"/*.log 2>/dev/null | awk '{print "  " $0}' || echo "  (no logs yet)"
     fi
 }
 
@@ -288,18 +287,18 @@ open_shell() {
         BIND_ARGS="$BIND_ARGS --bind ${DATA_DIR}:/srv/shiny-server/MicroarrAI/data"
     fi
 
-    print_info "Abriendo shell interactivo dentro del contenedor..."
-    print_info "(escribe 'exit' para salir)"
+    print_info "Opening interactive shell inside the container..."
+    print_info "(type 'exit' to leave)"
     echo ""
     ${SINGULARITY_CMD} shell $BIND_ARGS "$SIF_FILE"
 }
 
 cleanup() {
     echo ""
-    print_warn "Esto detendrá la instancia y eliminará la imagen $SIF_FILE."
-    read -r -p "¿Continuar? [s/N] " confirm
-    if [[ ! "$confirm" =~ ^[sS]$ ]]; then
-        echo "Cancelado."
+    print_warn "This will stop the instance and remove the image $SIF_FILE."
+    read -r -p "Continue? [y/N] " confirm
+    if [[ ! "$confirm" =~ ^[yY]$ ]]; then
+        echo "Cancelled."
         return 0
     fi
 
@@ -307,47 +306,47 @@ cleanup() {
 
     if [ -f "$SIF_FILE" ]; then
         rm -f "$SIF_FILE"
-        print_success "Imagen eliminada: $SIF_FILE"
+        print_success "Image removed: $SIF_FILE"
     fi
 
     if [ -d "$LOGS_DIR" ]; then
-        read -r -p "¿Eliminar también el directorio de logs ($LOGS_DIR)? [s/N] " confirm_logs
-        if [[ "$confirm_logs" =~ ^[sS]$ ]]; then
+        read -r -p "Also remove the logs directory ($LOGS_DIR)? [y/N] " confirm_logs
+        if [[ "$confirm_logs" =~ ^[yY]$ ]]; then
             rm -rf "$LOGS_DIR"
-            print_success "Logs eliminados."
+            print_success "Logs removed."
         fi
     fi
 
-    print_success "Limpieza completada."
+    print_success "Cleanup complete."
 }
 
 run_tests() {
     echo ""
     check_sif_file || return 1
-    print_info "Ejecutando tests de verificación del contenedor..."
+    print_info "Running container verification tests..."
     echo ""
     ${SINGULARITY_CMD} test "$SIF_FILE"
 }
 
 # -----------------------------------------------------------------------------
-# MENÚ PRINCIPAL
+# MAIN MENU
 # -----------------------------------------------------------------------------
 
 show_menu() {
     echo ""
     echo "  ┌─────────────────────────────────────────────────┐"
-    echo "  │  ¿Qué deseas hacer?                             │"
+    echo "  │  What do you want to do?                        │"
     echo "  ├─────────────────────────────────────────────────┤"
-    echo "  │  1) Construir imagen (.sif)                     │"
-    echo "  │  2) Iniciar aplicación                          │"
-    echo "  │  3) Detener aplicación                          │"
-    echo "  │  4) Ver logs en tiempo real                     │"
-    echo "  │  5) Reconstruir e iniciar (sin caché)           │"
-    echo "  │  6) Ver estado de la instancia                  │"
-    echo "  │  7) Abrir shell interactivo                     │"
-    echo "  │  8) Ejecutar tests de verificación              │"
-    echo "  │  9) Limpiar (detener y eliminar imagen)         │"
-    echo "  │  0) Salir                                       │"
+    echo "  │  1) Build image (.sif)                          │"
+    echo "  │  2) Start application                           │"
+    echo "  │  3) Stop application                            │"
+    echo "  │  4) Stream logs                                 │"
+    echo "  │  5) Rebuild and start (no cache)                │"
+    echo "  │  6) Show instance status                        │"
+    echo "  │  7) Open interactive shell                      │"
+    echo "  │  8) Run verification tests                      │"
+    echo "  │  9) Clean up (stop and remove image)            │"
+    echo "  │  0) Exit                                        │"
     echo "  └─────────────────────────────────────────────────┘"
     echo ""
 }
@@ -359,7 +358,7 @@ main() {
 
     while true; do
         show_menu
-        read -r -p "  Opción [0-9]: " choice
+        read -r -p "  Option [0-9]: " choice
         case $choice in
             1) build_image ;;
             2) start_app ;;
@@ -370,13 +369,13 @@ main() {
             7) open_shell ;;
             8) run_tests ;;
             9) cleanup ;;
-            0) echo ""; print_info "Saliendo."; echo ""; exit 0 ;;
-            *) print_warn "Opción no válida. Elige entre 0 y 9." ;;
+            0) echo ""; print_info "Exiting."; echo ""; exit 0 ;;
+            *) print_warn "Invalid option. Choose between 0 and 9." ;;
         esac
     done
 }
 
-# Permitir llamada directa a funciones: ./singularity-deploy.sh start
+# Allow direct function calls: ./singularity-deploy.sh start
 if [ $# -gt 0 ]; then
     check_singularity
     case "$1" in
@@ -390,8 +389,8 @@ if [ $# -gt 0 ]; then
         test)    run_tests ;;
         clean)   cleanup ;;
         *)
-            echo "Uso: $0 [build|start|stop|logs|rebuild|status|shell|test|clean]"
-            echo "     $0           (menú interactivo)"
+            echo "Usage: $0 [build|start|stop|logs|rebuild|status|shell|test|clean]"
+            echo "       $0           (interactive menu)"
             exit 1
             ;;
     esac

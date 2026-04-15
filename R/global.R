@@ -55,7 +55,6 @@ library(ggiraph)      # Interactive ggplot2 graphics
 # -----------------------------------------------------------------------------
 library(rgl)          # 3D visualization and graphics
 library(car)          # 3D ellipsoids and scatter plots
-library(shiny.molstar)       # Molecular structure visualization (Molstar)
 
 # -----------------------------------------------------------------------------
 # Statistical Analysis & Clustering

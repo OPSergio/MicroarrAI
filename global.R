@@ -58,7 +58,6 @@ library(car)          # 3D ellipsoids and scatter plots
 library(vegan)        # Ecological statistics (PCoA, NMDS, distance matrices)
 library(dbscan)       # Density-based spatial clustering (DBSCAN)
 library(cluster)      # Clustering algorithms and silhouette analysis
-library(shiny.molstar)    # Molecular structure visualization (Molstar)
 # -----------------------------------------------------------------------------
 # Machine Learning - Supervised Classification
 # -----------------------------------------------------------------------------

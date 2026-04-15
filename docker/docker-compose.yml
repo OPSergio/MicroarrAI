@@ -28,7 +28,7 @@ services:
     # Volumes for persistent data and logs
     volumes:
       # Uncomment to persist uploaded data
-      # - ./data:/srv/shiny-server/MicroarrAI/data
+      # - ../data:/srv/shiny-server/MicroarrAI/data
       
       # Persist logs
       - ../logs:/var/log/shiny-server
