@@ -54,7 +54,8 @@ ui <- fluidPage(
     ui_preprocess(),
     ui_peptide(),
     ui_ml(),
-    ui_protein_viz()
+    ui_protein_viz(),
+    ui_documentation()
   
   )# Cierre del body
 ) # Cierre del UI
@@ -4440,6 +4441,88 @@ output$normalization_method_description <- renderUI({
   )
   
   #### End Protein Visualization ####
+  
+  ########################### DOCUMENTATION ###################################
+  
+  # Reactive value to track selected documentation
+  selected_doc <- reactiveVal("index")
+  
+  # Observer for documentation selection
+  observeEvent(input$doc_selected, {
+    selected_doc(input$doc_selected)
+  })
+  
+  # Render documentation content
+  output$doc_content <- renderUI({
+    doc <- selected_doc()
+    
+    # Map doc IDs to file paths
+    doc_files <- list(
+      index = "docs/user_guide/00_index.md",
+      preprocessing = "docs/user_guide/01_preprocessing.md",
+      deg = "docs/user_guide/02_deg_analysis.md",
+      ml = "docs/user_guide/03_machine_learning.md"
+    )
+    
+    # Get the file path
+    file_path <- doc_files[[doc]]
+    
+    # Check if file exists
+    if (is.null(file_path) || !file.exists(file_path)) {
+      return(
+        tags$div(
+          style = "padding: 40px; text-align: center;",
+          tags$h3(
+            icon("exclamation-triangle"),
+            " Documentation Not Found",
+            style = "color: #856404;"
+          ),
+          tags$p(
+            paste("The requested documentation file could not be found:", file_path),
+            style = "color: #666;"
+          )
+        )
+      )
+    }
+    
+    # Read and render markdown
+    tryCatch({
+      # Read the markdown file
+      md_content <- readLines(file_path, warn = FALSE, encoding = "UTF-8")
+      md_text <- paste(md_content, collapse = "\n")
+      
+      # Convert markdown to HTML using markdown package
+      if (requireNamespace("markdown", quietly = TRUE)) {
+        html_content <- markdown::markdownToHTML(
+          text = md_text,
+          fragment.only = TRUE,
+          options = c("use_xhtml", "smartypants", "base64_images", "mathjax")
+        )
+        HTML(html_content)
+      } else {
+        # Fallback: display as preformatted text
+        tags$pre(
+          style = "white-space: pre-wrap; font-family: inherit;",
+          md_text
+        )
+      }
+    }, error = function(e) {
+      tags$div(
+        style = "padding: 40px; text-align: center;",
+        tags$h3(
+          icon("exclamation-circle"),
+          " Error Loading Documentation",
+          style = "color: #721c24;"
+        ),
+        tags$p(
+          paste("Error:", e$message),
+          style = "color: #666;"
+        )
+      )
+    })
+  })
+  
+  #### End Documentation ####
   
 }
 
