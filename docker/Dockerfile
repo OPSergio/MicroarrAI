@@ -30,6 +30,9 @@ RUN apt-get update && apt-get install -y \
     libfontconfig1-dev \
     libharfbuzz-dev \
     libfribidi-dev \
+    # Mathematics and Graph libs (required for mixOmics/igraph)
+    libglpk-dev \
+    libgmp3-dev \
     # Excel file support
     libzip-dev \
     # Database support
@@ -46,8 +49,8 @@ RUN apt-get update && apt-get install -y \
 # =============================================================================
 # Install R packages in logical groups for better build caching
 
-# Core tidyverse extensions (not in base image)
-RUN R -e "install.packages(c('openxlsx'), repos='https://cloud.r-project.org/')"
+# Core tidyverse extensions and fixes for xfun/knitr compatibility
+RUN R -e "install.packages(c('xfun', 'knitr', 'rmarkdown', 'openxlsx'), repos='https://cloud.r-project.org/')"
 
 # Shiny ecosystem
 RUN R -e "install.packages(c( \
@@ -103,12 +106,12 @@ RUN R -e "install.packages(c( \
     ), repos='https://cloud.r-project.org/')"
 
 # Bioconductor packages (mixOmics)
-RUN R -e "if (!requireNamespace('BiocManager', quietly = TRUE)) install.packages('BiocManager'); \
-    BiocManager::install('mixOmics')"
+RUN R -e "if (!requireNamespace('BiocManager', quietly = TRUE)) install.packages('BiocManager', repos='https://cloud.r-project.org/'); \
+    BiocManager::install('mixOmics', ask = FALSE, update = FALSE); \
+    if (!require('mixOmics', character.only = TRUE)) stop('Failed to install mixOmics! Check Docker build logs for missing system dependencies.')"
 
-# GitHub packages (shiny.molstar)
-RUN R -e "if (!requireNamespace('remotes', quietly = TRUE)) install.packages('remotes'); \
-    remotes::install_github('Bristol-Vaccine-Centre/shiny.molstar')"
+# Install additional packages (ggpubr)
+RUN R -e "install.packages('ggpubr')"
 
 # =============================================================================
 # APPLICATION DEPLOYMENT
@@ -139,9 +142,8 @@ RUN chown -R shiny:shiny /srv/shiny-server/MicroarrAI
 # SHINY SERVER CONFIGURATION
 # =============================================================================
 
-# Copy custom Shiny Server configuration (optional)
-# Context is the repo root; shiny-server.conf lives in docker/.
-# COPY docker/shiny-server.conf /etc/shiny-server/shiny-server.conf
+# Copy custom Shiny Server configuration (optional - see shiny-server.conf)
+# COPY shiny-server.conf /etc/shiny-server/shiny-server.conf
 
 # Expose port 3838 (default Shiny Server port)
 EXPOSE 3838

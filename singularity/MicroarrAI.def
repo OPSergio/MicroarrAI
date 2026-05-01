@@ -115,6 +115,8 @@ From: rocker/shiny-verse:4.4.0
         libfontconfig1-dev \
         libharfbuzz-dev \
         libfribidi-dev \
+        libglpk-dev \
+        libgmp3-dev \
         libzip-dev \
         libpq-dev \
         libsqlite3-dev \
@@ -129,7 +131,7 @@ From: rocker/shiny-verse:4.4.0
     # -------------------------------------------------------------------------
 
     # tidyverse extensions
-    R -e "install.packages('openxlsx', repos='https://cloud.r-project.org/')"
+    R -e "install.packages(c('xfun', 'knitr', 'rmarkdown', 'openxlsx'), repos='https://cloud.r-project.org/')"
 
     # Shiny ecosystem
     R -e "install.packages(c(
