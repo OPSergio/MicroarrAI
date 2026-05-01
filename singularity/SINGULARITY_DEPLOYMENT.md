@@ -50,9 +50,9 @@ cd singularity-ce-${SINGULARITY_VERSION}
 
 ```bash
 # 1. Build the image (requires root or fakeroot, ~15-30 min)
-sudo singularity build MicroarrAI.sif MicroarrAI.def
+sudo singularity build MicroarrAI.sif singularity/MicroarrAI.def
 # or with fakeroot:
-singularity build --fakeroot MicroarrAI.sif MicroarrAI.def
+singularity build --fakeroot MicroarrAI.sif singularity/MicroarrAI.def
 
 # 2. Create logs directory
 mkdir -p logs
@@ -83,13 +83,13 @@ chmod +x singularity-deploy.sh
 ### Method 1: As root (most compatible)
 
 ```bash
-sudo singularity build MicroarrAI.sif MicroarrAI.def
+sudo singularity build MicroarrAI.sif singularity/MicroarrAI.def
 ```
 
 ### Method 2: With fakeroot (no root, recommended on systems with /etc/subuid configured)
 
 ```bash
-singularity build --fakeroot MicroarrAI.sif MicroarrAI.def
+singularity build --fakeroot MicroarrAI.sif singularity/MicroarrAI.def
 ```
 
 To enable fakeroot for your user (requires system root once):
@@ -103,7 +103,7 @@ sudo singularity config fakeroot --add $USER
 Apptainer 1.0+ allows unprivileged builds in some HPC environments:
 
 ```bash
-apptainer build MicroarrAI.sif MicroarrAI.def
+apptainer build MicroarrAI.sif singularity/MicroarrAI.def
 ```
 
 > The build downloads the base image from Docker Hub and compiles all R packages. The first time takes **15–30 minutes**. The resulting image takes up ~4–5 GB.
