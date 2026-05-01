@@ -715,7 +715,7 @@ server_protein_viz <- function(input, output, session,
       )
     } else {
       tags$iframe(
-        src = "ngl_viewer.html",
+        src = "ngl_viewer.html?target=ige",
         width = "100%",
         height = "600px",
         style = "border:none; border-radius:10px;"
@@ -737,7 +737,7 @@ server_protein_viz <- function(input, output, session,
       )
     } else {
       tags$iframe(
-        src = "ngl_viewer.html",
+        src = "ngl_viewer.html?target=igg4",
         width = "100%",
         height = "600px",
         style = "border:none; border-radius:10px;"
@@ -1050,7 +1050,7 @@ server_protein_viz <- function(input, output, session,
           message = list(type = "color_by_polarity")
         )
       } else {
-        # Biomarkers mode
+        # Biomarkers mode for IgE
         bm_ige <- expression_data_ige()$biomarkers_tbl
         if (nrow(bm_ige) > 0) {
           Structure_info <- protein_info_data()$Structure_info
@@ -1061,9 +1061,11 @@ server_protein_viz <- function(input, output, session,
             type = "send_to_molstar",
             message = list(
               type = "highlight_biomarkers",
+              target = "ige",  # Target IgE viewer only
               residues = as.list(biomarker_resi_ngl)
             )
           )
+          message("[COLOR_MODE] ✓ IgE biomarkers sent: ", length(biomarker_resi_ngl), " residues")
         }
       }
     }
@@ -1103,7 +1105,7 @@ server_protein_viz <- function(input, output, session,
           message = list(type = "color_by_polarity")
         )
       } else {
-        # Biomarkers mode
+        # Biomarkers mode for IgG4
         bm_igg4 <- expression_data_igg4()$biomarkers_tbl
         if (nrow(bm_igg4) > 0) {
           Structure_info <- protein_info_data()$Structure_info
@@ -1114,9 +1116,11 @@ server_protein_viz <- function(input, output, session,
             type = "send_to_molstar",
             message = list(
               type = "highlight_biomarkers",
+              target = "igg4",  # Target IgG4 viewer only
               residues = as.list(biomarker_resi_ngl)
             )
           )
+          message("[COLOR_MODE] ✓ IgG4 biomarkers sent: ", length(biomarker_resi_ngl), " residues")
         }
       }
     }

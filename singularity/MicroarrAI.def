@@ -1,0 +1,284 @@
+# =============================================================================
+# MicroarrAI - Singularity/Apptainer Definition File
+# =============================================================================
+# Replicates exactly the same deployment as the Docker/docker-compose setup.
+# Base: rocker/shiny-verse:4.4.0 (R 4.4.0, Shiny Server, tidyverse)
+#
+# BUILD (from repo root):
+#   singularity build --fakeroot MicroarrAI.sif singularity/MicroarrAI.def
+#   # or as root:
+#   sudo singularity build MicroarrAI.sif singularity/MicroarrAI.def
+#
+# RUN (background instance):
+#   singularity instance start \
+#       --bind ./logs:/var/log/shiny-server \
+#       MicroarrAI.sif microarrai
+#
+# ACCESS:
+#   http://localhost:3838/MicroarrAI
+# =============================================================================
+
+Bootstrap: docker
+From: rocker/shiny-verse:4.4.0
+
+# =============================================================================
+# METADATA
+# =============================================================================
+%labels
+    Maintainer       MicroarrAI
+    Version          1.0.0
+    Description      Peptide microarray analysis platform with ML
+    Base             rocker/shiny-verse:4.4.0
+    Port             3838
+    URL              http://localhost:3838/MicroarrAI
+
+%help
+    MicroarrAI - Peptide Microarray Analysis Platform
+    ===================================================
+
+    Build the image (from the repository root):
+      singularity build --fakeroot MicroarrAI.sif singularity/MicroarrAI.def
+      # or as root:
+      sudo singularity build MicroarrAI.sif singularity/MicroarrAI.def
+
+    Start in background:
+      mkdir -p logs
+      singularity instance start \
+          --bind ./logs:/var/log/shiny-server \
+          MicroarrAI.sif microarrai
+
+    Access the application:
+      http://localhost:3838/MicroarrAI
+
+    Stream logs:
+      tail -f logs/*.log
+
+    Stop the instance:
+      singularity instance stop microarrai
+
+    Open a shell inside the container:
+      singularity shell --bind ./logs:/var/log/shiny-server MicroarrAI.sif
+
+    Persistent data:
+      singularity instance start \
+          --bind ./logs:/var/log/shiny-server \
+          --bind ./data:/srv/shiny-server/MicroarrAI/data \
+          MicroarrAI.sif microarrai
+
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
+%environment
+    export SHINY_LOG_LEVEL=INFO
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+    export TZ=UTC
+
+# =============================================================================
+# APPLICATION FILES
+# Copied to staging directory /tmp/microarrai_src before %post.
+# This ensures compatibility with all Singularity/Apptainer versions.
+# Files are moved to their final destination during %post.
+# =============================================================================
+%files
+    www             /tmp/microarrai_src/www
+    Def             /tmp/microarrai_src/Def
+    docs            /tmp/microarrai_src/docs
+    R               /tmp/microarrai_src/R
+    app.R           /tmp/microarrai_src/app.R
+    global.R        /tmp/microarrai_src/global.R
+    singularity/shiny-server-singularity.conf /tmp/microarrai_src/shiny-server.conf
+
+# =============================================================================
+# BUILD STEPS
+# Identical to the Dockerfile: same system dependencies, same R packages.
+# =============================================================================
+%post
+    set -e
+
+    # -------------------------------------------------------------------------
+    # SYSTEM DEPENDENCIES (mirrors the Dockerfile)
+    # -------------------------------------------------------------------------
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        libcurl4-openssl-dev \
+        libssl-dev \
+        libxml2-dev \
+        libcairo2-dev \
+        libxt-dev \
+        libx11-dev \
+        libglu1-mesa-dev \
+        libfreetype6-dev \
+        libpng-dev \
+        libtiff5-dev \
+        libjpeg-dev \
+        libfontconfig1-dev \
+        libharfbuzz-dev \
+        libfribidi-dev \
+        libglpk-dev \
+        libgmp3-dev \
+        libzip-dev \
+        libpq-dev \
+        libsqlite3-dev \
+        zlib1g-dev \
+        git \
+        wget \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+    # -------------------------------------------------------------------------
+    # R PACKAGES - CRAN (mirrors the Dockerfile)
+    # -------------------------------------------------------------------------
+
+    # tidyverse extensions
+    R -e "install.packages(c('xfun', 'knitr', 'rmarkdown', 'openxlsx'), repos='https://cloud.r-project.org/')"
+
+    # Shiny ecosystem
+    R -e "install.packages(c(
+        'shinyWidgets',
+        'shinydashboard',
+        'shinycssloaders',
+        'DT',
+        'shinyjs',
+        'shinythemes',
+        'bslib',
+        'shinyFiles',
+        'rhandsontable',
+        'markdown'
+        ), repos='https://cloud.r-project.org/')"
+
+    # Visualization
+    R -e "install.packages(c(
+        'plotly',
+        'ggpubr',
+        'cowplot',
+        'ggrepel',
+        'ggvenn',
+        'ggiraph',
+        'rgl',
+        'car'
+        ), repos='https://cloud.r-project.org/')"
+
+    # Statistical packages
+    R -e "install.packages(c(
+        'vegan',
+        'dbscan',
+        'cluster'
+        ), repos='https://cloud.r-project.org/')"
+
+    # Machine Learning - Part 1 (CRAN)
+    R -e "install.packages(c(
+        'C50',
+        'randomForest',
+        'e1071',
+        'kernlab',
+        'caret',
+        'xgboost',
+        'shapviz'
+        ), repos='https://cloud.r-project.org/')"
+
+    # Machine Learning - Part 2 (tidymodels)
+    R -e "install.packages(c(
+        'tidymodels',
+        'parsnip',
+        'yardstick',
+        'pROC',
+        'MLmetrics'
+        ), repos='https://cloud.r-project.org/')"
+
+    # -------------------------------------------------------------------------
+    # R PACKAGES - BIOCONDUCTOR
+    # -------------------------------------------------------------------------
+    R -e "if (!requireNamespace('BiocManager', quietly = TRUE)) \
+              install.packages('BiocManager', repos='https://cloud.r-project.org/'); \
+          BiocManager::install('mixOmics', ask=FALSE, update=FALSE)"
+
+    # -------------------------------------------------------------------------
+    # R PACKAGES - GITHUB
+    # -------------------------------------------------------------------------
+    R -e "if (!requireNamespace('remotes', quietly = TRUE)) \
+              install.packages('remotes', repos='https://cloud.r-project.org/'); \
+          remotes::install_github('Bristol-Vaccine-Centre/shiny.molstar')"
+
+    # -------------------------------------------------------------------------
+    # APPLICATION DEPLOYMENT
+    # -------------------------------------------------------------------------
+
+    # Clear default Shiny Server directory (mirrors the Dockerfile)
+    rm -rf /srv/shiny-server/*
+
+    # Create application directory
+    mkdir -p /srv/shiny-server/MicroarrAI
+
+    # Move files from staging area to final destination
+    cp -r /tmp/microarrai_src/www   /srv/shiny-server/MicroarrAI/www
+    cp -r /tmp/microarrai_src/Def   /srv/shiny-server/MicroarrAI/Def
+    cp -r /tmp/microarrai_src/docs  /srv/shiny-server/MicroarrAI/docs
+    cp -r /tmp/microarrai_src/R     /srv/shiny-server/MicroarrAI/R
+    cp    /tmp/microarrai_src/app.R    /srv/shiny-server/MicroarrAI/app.R
+    cp    /tmp/microarrai_src/global.R /srv/shiny-server/MicroarrAI/global.R
+
+    # Deploy Singularity-compatible Shiny Server configuration
+    cp /tmp/microarrai_src/shiny-server.conf /etc/shiny-server/shiny-server.conf
+
+    # Clean up staging area
+    rm -rf /tmp/microarrai_src
+
+    # -------------------------------------------------------------------------
+    # PERMISSIONS
+    # -------------------------------------------------------------------------
+    mkdir -p /var/log/shiny-server
+    chown -R shiny:shiny /srv/shiny-server/MicroarrAI
+    chown -R shiny:shiny /var/log/shiny-server
+    chmod -R 755 /srv/shiny-server/MicroarrAI
+
+# =============================================================================
+# ENTRYPOINT
+# Equivalent to CMD ["/usr/bin/shiny-server"] in the Dockerfile
+# =============================================================================
+
+# Used with: singularity run MicroarrAI.sif
+%runscript
+    exec /usr/bin/shiny-server "$@"
+
+# Used with: singularity instance start MicroarrAI.sif <name>
+%startscript
+    exec /usr/bin/shiny-server
+
+# =============================================================================
+# POST-BUILD VERIFICATION
+# Equivalent to a basic healthcheck
+# =============================================================================
+%test
+    echo "=== Checking essential R packages ==="
+    R --no-save -e "
+    pkgs <- c('shiny', 'shinydashboard', 'shinyWidgets', 'DT',
+              'plotly', 'ggplot2', 'vegan', 'randomForest',
+              'xgboost', 'caret', 'mixOmics')
+    ok <- sapply(pkgs, requireNamespace, quietly = TRUE)
+    if (all(ok)) {
+        cat('All R packages: OK\n')
+    } else {
+        cat('Missing packages:', paste(pkgs[!ok], collapse=', '), '\n')
+        quit(status = 1)
+    }
+    "
+
+    echo "=== Checking application files ==="
+    for f in app.R global.R; do
+        test -f /srv/shiny-server/MicroarrAI/$f \
+            && echo "$f: OK" \
+            || (echo "$f: MISSING" && exit 1)
+    done
+    for d in www Def docs R; do
+        test -d /srv/shiny-server/MicroarrAI/$d \
+            && echo "$d/: OK" \
+            || (echo "$d/: MISSING" && exit 1)
+    done
+
+    echo "=== Checking Shiny Server configuration ==="
+    test -f /etc/shiny-server/shiny-server.conf \
+        && echo "shiny-server.conf: OK" \
+        || (echo "shiny-server.conf: MISSING" && exit 1)
+
+    echo "=== All checks passed ==="

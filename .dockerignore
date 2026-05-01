@@ -1,0 +1,60 @@
+# =============================================================================
+# .dockerignore
+# =============================================================================
+# Exclude unnecessary files from Docker build context for faster builds
+# =============================================================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation (keep docs/ folder for in-app documentation)
+*.md
+!docs/**/*.md
+
+# R specific
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# CI/CD
+.github
+.gitlab-ci.yml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Data files (optional - uncomment if you don't want to include data in image)
+# data/
+# *.csv
+# *.xlsx
+# *.rds
+
+# Cache
+cache/
+.cache/

@@ -45,7 +45,6 @@ library(ggpubr)       # Publication-ready plots
 library(cowplot)      # Plot composition and themes
 library(ggrepel)      # Non-overlapping text labels
 library(ggvenn)       # Venn diagrams
-library(formattable)  # Styled and formatted tables
 library(ggiraph)      # Interactive ggplot2 graphics
 # -----------------------------------------------------------------------------
 # Data Visualization - 3D
@@ -59,7 +58,6 @@ library(car)          # 3D ellipsoids and scatter plots
 library(vegan)        # Ecological statistics (PCoA, NMDS, distance matrices)
 library(dbscan)       # Density-based spatial clustering (DBSCAN)
 library(cluster)      # Clustering algorithms and silhouette analysis
-library(shiny.molstar)    # Molecular structure visualization (Molstar)
 # -----------------------------------------------------------------------------
 # Machine Learning - Supervised Classification
 # -----------------------------------------------------------------------------
