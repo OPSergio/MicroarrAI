@@ -1214,7 +1214,7 @@ plot_varimp_histogram <- function(varimp_df) {
       y = Importance
     )
   ) +
-    ggplot2::geom_col(fill = "#667eea", alpha = 0.85) +
+    ggplot2::geom_col(fill = "#17a589", alpha = 0.85) +
     ggplot2::coord_flip() +
     ggplot2::labs(
       title = "Feature Importance",
@@ -1272,7 +1272,7 @@ create_performance_summary_cards <- function(result, model_name) {
           tags$div(
             style = "background: white; border-radius: 4px; padding: 10px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
             tags$div(
-              style = "font-size: 1.5em; font-weight: 700; color: #667eea;",
+              style = "font-size: 1.5em; font-weight: 700; color: #17a589;",
               ifelse(!is.na(auc), auc, "N/A")
             ),
             tags$div(
@@ -1313,7 +1313,7 @@ create_performance_summary_cards <- function(result, model_name) {
       tags$div(
         style = "margin-top: 10px; padding: 8px; background: white; border-radius: 4px; font-size: 12px; color: #666;",
         tags$span(
-          icon("cogs", style = "color: #667eea; margin-right: 5px;"),
+          icon("cogs", style = "color: #17a589; margin-right: 5px;"),
           strong(method_desc), " | ",
           n_features, " features"
         )

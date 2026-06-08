@@ -119,6 +119,7 @@ source("R/server/visualization_protein.R", encoding = "UTF-8")
 # UI MODULES
 # =============================================================================
 
+source("R/ui/ui_navbar.R", encoding = "UTF-8")         # Top glass navbar (METIS)
 source("R/ui/ui_home.R", encoding = "UTF-8")           # Home page and intro
 source("R/ui/ui_preprocess.R", encoding = "UTF-8")    # Data preprocessing tab
 source("R/ui/ui_peptide.R", encoding = "UTF-8")       # Peptide analysis tab

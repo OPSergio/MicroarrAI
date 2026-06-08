@@ -13,8 +13,14 @@ source("R/global.R")
 ui <- fluidPage(
   # ===== Head: Metadata & External Resources =====
   tags$head(
-    tags$title("MicroarrAI"),
-    tags$link(rel = "icon", type = "image/png", href = "assets/logov2.png")
+    tags$title("METIS"),
+    tags$link(rel = "icon", type = "image/svg+xml", href = "landing/assets/metis-mark.svg"),
+    tags$link(rel = "preconnect", href = "https://fonts.googleapis.com"),
+    tags$link(rel = "preconnect", href = "https://fonts.gstatic.com", crossorigin = NA),
+    tags$link(
+      rel = "stylesheet",
+      href = "https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+    )
   ),
   
   # ===== Shiny Extensions =====
@@ -34,22 +40,12 @@ ui <- fluidPage(
   includeCSS("www/styles.css"),
   includeScript("www/custom.js"),
   
-  # ===== Title Panel with Logo =====
-  titlePanel(
-    fluidRow(
-      class = "title",
-      column(
-        12,
-        tags$div(
-          tags$img(src = "assets/logov2.png", class = "logo_app"),
-          class = "logo-container"
-        )
-      )
-    )
-  ),
-  
+  # ===== Top Navbar (glass, METIS) =====
+  ui_navbar(),
+
   # ===== Tab Navigation =====
   tabsetPanel(
+    id = "main_tabs",
     ui_home(),
     ui_preprocess(),
     ui_peptide(),
@@ -62,7 +58,12 @@ ui <- fluidPage(
 
 
 server <- function(input, output, session){
-  
+
+  # ===== Glass navbar -> tab switching =====
+  observeEvent(input$nav_target, {
+    updateTabsetPanel(session, "main_tabs", selected = input$nav_target)
+  })
+
   ########################### INDEX ###########################################
   volumes <- getVolumes()()
   shinyDirChoose(input, 'directory', roots=volumes, session=session)

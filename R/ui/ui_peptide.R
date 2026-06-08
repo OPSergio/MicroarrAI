@@ -185,7 +185,7 @@ ui_peptide <- function() {
         column(
           12,
           tags$div(
-            style = "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; padding: 20px; margin-bottom: 25px; color: white;",
+            style = "background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); border-radius: 8px; padding: 20px; margin-bottom: 25px; color: white;",
             tags$h4("What are Differentially Expressed Genes (DEGs)?", style = "margin-top: 0; font-weight: bold; color: white;"),
             tags$p(
               "Differentially Expressed Genes (DEGs) are features showing significant changes in expression levels between experimental conditions. In biomarker discovery, identifying DEGs is crucial as they represent potential diagnostic or therapeutic targets.",
@@ -243,7 +243,7 @@ ui_peptide <- function() {
           column(
             12,
             tags$div(
-              style = "background: #f8f9fa; border-left: 4px solid #667eea; padding: 15px; margin-bottom: 20px; border-radius: 4px;",
+              style = "background: #f8f9fa; border-left: 4px solid #17a589; padding: 15px; margin-bottom: 20px; border-radius: 4px;",
               tags$p(
                 tags$strong("About Volcano Plots:"), " Volcano plots visualize the relationship between statistical significance (p-value) and biological significance (fold change). Points in the upper corners represent highly significant and biologically relevant changes.",
                 style = "margin: 0; color: #191c32;"
@@ -358,7 +358,7 @@ ui_peptide <- function() {
         tags$div(
           style = "max-width: 1200px; margin: 0 auto;",
           tags$div(
-            style = "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 20px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);",
+            style = "background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); border-radius: 12px; padding: 20px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(24, 188, 156, 0.3);",
             tags$div(
               style = "display: flex; align-items: center; margin-bottom: 10px;",
               icon("filter", style = "font-size: 22px; color: white; margin-right: 12px;"),
@@ -376,7 +376,7 @@ ui_peptide <- function() {
                 style = "background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);",
                 tags$div(
                   style = "display: flex; align-items: center; margin-bottom: 15px;",
-                  icon("chart-line", style = "font-size: 18px; color: #667eea; margin-right: 10px;"),
+                  icon("chart-line", style = "font-size: 18px; color: #17a589; margin-right: 10px;"),
                   tags$h5("Statistical Significance", style = "color: #191c32; margin: 0; font-weight: 600;")
                 ),
                 sliderInput(
@@ -397,7 +397,7 @@ ui_peptide <- function() {
                 style = "background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);",
                 tags$div(
                   style = "display: flex; align-items: center; margin-bottom: 15px;",
-                  icon("bullseye", style = "font-size: 18px; color: #667eea; margin-right: 10px;"),
+                  icon("bullseye", style = "font-size: 18px; color: #17a589; margin-right: 10px;"),
                   tags$h5("Predictive Performance", style = "color: #191c32; margin: 0; font-weight: 600;")
                 ),
                 sliderInput(
@@ -468,7 +468,7 @@ ui_peptide <- function() {
           column(
             12,
             tags$div(
-              style = "background: #f8f9fa; border-left: 4px solid #667eea; padding: 20px; margin-bottom: 25px; border-radius: 4px;",
+              style = "background: #f8f9fa; border-left: 4px solid #17a589; padding: 20px; margin-bottom: 25px; border-radius: 4px;",
               tags$h4("Biomarker Selection Methods", style = "margin-top: 0; color: #191c32; font-weight: bold;"),
               tags$p(
                 tags$strong("Top N:"), " Selects the N best peptides ranked by a combined score of p-value and AUC. This method ensures you get the most statistically significant and discriminatory biomarkers.",

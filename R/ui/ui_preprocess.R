@@ -88,10 +88,10 @@ ui_preprocess <- function() {
           style = "padding: 10px;",
           actionButton("load_example_db", 
                      label = tagList(icon("users"), " Load Clinical Data"),
-                     style = "width: 100%; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 8px;"),
+                     style = "width: 100%; margin-bottom: 8px; background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); color: white; border: none; padding: 8px;"),
           actionButton("load_example_pep", 
                      label = tagList(icon("dna"), " Load Peptide Data"),
-                     style = "width: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 8px;")
+                     style = "width: 100%; background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); color: white; border: none; padding: 8px;")
         )
       )
     ),
@@ -455,7 +455,7 @@ ui_preprocess <- function() {
                 style = "text-align: center;",
                 actionButton("process_button", 
                            label = tagList(icon("play-circle"), " Start Normalization Process"),
-                           style = "font-size: 18px; padding: 15px 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);")
+                           style = "font-size: 18px; padding: 15px 40px; background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); color: white; border: none; border-radius: 8px; box-shadow: 0 4px 15px rgba(24, 188, 156, 0.3);")
               )
             )
           ),
@@ -592,7 +592,7 @@ ui_preprocess <- function() {
             
             # Find & Replace panel
             tags$div(
-              style = "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; padding: 15px; margin-bottom: 15px; color: white;",
+              style = "background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); border-radius: 8px; padding: 15px; margin-bottom: 15px; color: white;",
               tags$h6(icon("search"), " Find & Replace", style = "color: white; margin-bottom: 10px;"),
               fluidRow(
                 column(
@@ -611,7 +611,7 @@ ui_preprocess <- function() {
                   3,
                   br(),
                   actionButton("apply_find_replace", "Replace All", 
-                             style = "background: white; color: #667eea; border: none; padding: 8px 20px; width: 100%; font-weight: bold;")
+                             style = "background: white; color: #17a589; border: none; padding: 8px 20px; width: 100%; font-weight: bold;")
                 )
               )
             ),
@@ -625,7 +625,7 @@ ui_preprocess <- function() {
                 6,
                 actionButton("apply_metadata_edits", 
                            label = tagList(icon("check"), " Apply Changes"),
-                           style = "width: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 10px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);")
+                           style = "width: 100%; background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); color: white; border: none; padding: 10px; box-shadow: 0 4px 15px rgba(24, 188, 156, 0.3);")
               ),
               column(
                 6,
@@ -697,7 +697,7 @@ ui_preprocess <- function() {
               style = "text-align: center;",
               actionButton("finish_preprocess", 
                          label = tagList(icon("rocket"), " Finish Preprocess & Continue"),
-                         style = "font-size: 16px; padding: 12px 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);")
+                         style = "font-size: 16px; padding: 12px 30px; background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); color: white; border: none; border-radius: 8px; box-shadow: 0 4px 15px rgba(24, 188, 156, 0.3);")
             )
           )
         )

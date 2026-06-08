@@ -7,6 +7,28 @@
  */
 
 /**
+ * METIS glass navbar -> Shiny tab switching (called from inline onclick).
+ */
+function metisNav(tab, el) {
+  if (window.Shiny) Shiny.setInputValue('nav_target', tab, { priority: 'event' });
+  document.querySelectorAll('.metis-link').forEach(function (l) { l.classList.remove('active'); });
+  if (el) el.classList.add('active');
+}
+
+/**
+ * Light/dark switcher. Themes the app navbar (body.metis-light) and forwards
+ * the choice to the landing iframe via postMessage.
+ */
+function metisTheme(btn) {
+  var light = document.body.classList.toggle('metis-light');
+  if (btn) btn.innerHTML = light ? '☾' : '☀';  // ☾ / ☀
+  var frame = document.querySelector('.metis-home__frame');
+  if (frame && frame.contentWindow) {
+    frame.contentWindow.postMessage({ type: 'metis-theme', light: light }, '*');
+  }
+}
+
+/**
  * Scroll Event Handler for Animated Tiles
  * 
  * Updates tile colors based on scroll position through sections
@@ -195,42 +217,10 @@ $(document).ready(function() {
     Shiny.setInputValue('preprocess_nav_section', targetSection, {priority: "event"});
   });
   
-  // ===== ACTIVE STATE STYLING =====
-  $(document).on('mouseenter', '.ml-sidebar-item, .peptide-nav-item', function() {
-    if (!$(this).hasClass('active')) {
-      $(this).css('background', 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)');
-      $(this).css('color', 'white');
-      $(this).css('transform', 'translateX(5px)');
-    }
-  });
-  
-  $(document).on('mouseleave', '.ml-sidebar-item, .peptide-nav-item', function() {
-    if (!$(this).hasClass('active')) {
-      $(this).css('background', '#f8f9fa');
-      $(this).css('color', '#191c32');
-      $(this).css('transform', 'translateX(0)');
-    }
-  });
-  
-  // Set active item styling
-  $(document).on('click', '.ml-sidebar-item, .peptide-nav-item', function() {
-    // Remove active styling from all siblings
-    $(this).siblings().css({
-      'background': '#f8f9fa',
-      'color': '#191c32',
-      'transform': 'translateX(0)',
-      'box-shadow': 'none'
-    });
-    
-    // Add active styling to clicked item
-    $(this).css({
-      'background': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      'color': 'white',
-      'transform': 'translateX(5px)',
-      'box-shadow': '0 4px 12px rgba(102, 126, 234, 0.3)'
-    });
-  });
-  
+  // NOTE: hover/active appearance for sidebar items is handled purely in CSS
+  // now (.ml-sidebar-item:hover / .ml-sidebar-item.active) to match the METIS
+  // theme. The old inline-style handlers were removed.
+
   // Protein Visualization Sidebar Toggle
   var proteinSidebarOpen = false;
   $(document).on('click', '#protein-sidebar-toggle', function() {

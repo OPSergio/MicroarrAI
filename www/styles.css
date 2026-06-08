@@ -239,23 +239,18 @@ body {
   margin-top: 10px;
 }
 
-/* ===== Typography ===== */
-h3 {
-  font-weight: bold;
-  background: -webkit-linear-gradient(white, gray); 
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  margin-bottom: 20px;
-  padding: 10px 0;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  text-align: center;
-  font-size: 2.5em;
+/* ===== Typography (modern, 21st.dev) ===== */
+h1, h2, h3 {
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  color: inherit;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  text-transform: none;
+  text-align: left;
 }
-
-h3 span {
-  font-family: 'Sixtyfour', sans-serif;
-}
+h1 { font-size: 2.1rem;  font-weight: 700; margin: 0 0 16px; }
+h2 { font-size: 1.6rem;  font-weight: 700; margin: 28px 0 14px; }
+h3 { font-size: 1.25rem; font-weight: 600; margin: 22px 0 10px; }
 
 h6 {
   font-style: italic;
@@ -303,8 +298,12 @@ p, ul {
   top: 80px;
   width: 320px;
   height: calc(100vh - 80px);
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  box-shadow: 4px 0 15px rgba(0,0,0,0.3);
+  /* NOTE: no backdrop-filter / transform here — the toggle button is a fixed
+     child, and those properties would make it positioned relative to the
+     sidebar (off-screen) instead of the viewport, hiding it. Use a solid bg. */
+  background: #14162b;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 8px 0 30px rgba(0, 0, 0, 0.35);
   transition: left 0.3s ease;
   z-index: 1000;
   overflow-y: auto;
@@ -320,20 +319,24 @@ p, ul {
   left: 0;
   top: 50%;
   transform: translateY(-50%);
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
+  background: rgba(20, 23, 46, 0.85);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  color: #18BC9C;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: none;
   padding: 15px 8px;
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 10px 10px 0;
   cursor: pointer;
   z-index: 999;
-  box-shadow: 2px 2px 10px rgba(0,0,0,0.3);
-  transition: all 0.3s ease;
+  box-shadow: 2px 2px 12px rgba(0, 0, 0, 0.35);
+  transition: all 0.25s ease;
   font-size: 18px;
 }
 
 .ml-sidebar-toggle:hover {
-  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+  background: rgba(24, 188, 156, 0.18);
+  color: #eef1f8;
   padding-left: 12px;
 }
 
@@ -342,35 +345,39 @@ p, ul {
 }
 
 .ml-sidebar h4 {
-  color: white;
+  color: #eef1f8;
   font-weight: 600;
   margin-bottom: 20px;
   text-align: center;
-  font-size: 1.3em;
-  text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
+  font-size: 1.2em;
+  letter-spacing: -0.01em;
+  text-shadow: none;
 }
 
 .ml-sidebar-item {
-  background: rgba(255,255,255,0.15);
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 3px solid transparent;
+  border-radius: 10px;
   padding: 12px 15px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   cursor: pointer;
-  transition: all 0.3s ease;
-  color: white;
+  transition: background .2s ease, transform .2s ease, border-color .2s ease, color .2s ease;
+  color: #cdd2e6;
   font-weight: 500;
-  border-left: 4px solid transparent;
 }
 
 .ml-sidebar-item:hover {
-  background: rgba(255,255,255,0.25);
-  transform: translateX(5px);
-  border-left-color: white;
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateX(4px);
+  border-left-color: #18BC9C;
+  color: #eef1f8;
 }
 
 .ml-sidebar-item.active {
-  background: rgba(255,255,255,0.3);
-  border-left-color: #ffd700;
+  background: rgba(24, 188, 156, 0.14);
+  border-left-color: #18BC9C;
+  color: #ffffff;
   font-weight: 600;
 }
 
@@ -379,10 +386,10 @@ p, ul {
 }
 
 .ml-sidebar-section-title {
-  color: rgba(255,255,255,0.7);
-  font-size: 0.85em;
+  color: rgba(238, 241, 248, 0.45);
+  font-size: 0.78em;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.2px;
   margin-bottom: 10px;
   font-weight: 600;
   text-shadow: none;
@@ -405,17 +412,17 @@ p, ul {
 }
 
 .ml-sidebar::-webkit-scrollbar-track {
-  background: rgba(255,255,255,0.1);
+  background: rgba(255, 255, 255, 0.05);
   border-radius: 10px;
 }
 
 .ml-sidebar::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.3);
+  background: rgba(24, 188, 156, 0.40);
   border-radius: 10px;
 }
 
 .ml-sidebar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255,255,255,0.5);
+  background: rgba(24, 188, 156, 0.65);
 }
 
 /* ===== Footer ===== */
@@ -428,4 +435,198 @@ footer {
   color: white;
   padding: 10px;
   font-size: 14px;
+}
+
+/* ============================================================================
+ * METIS — Glass Navbar (vanilla, `metis-` scoped, no Bootstrap collisions)
+ * ============================================================================ */
+:root { --metis-nav-space: 92px; }
+
+/* hide the default Bootstrap tab header of the MAIN tabset only
+   (inner tabsets elsewhere keep their own tabs) */
+ul#main_tabs.nav-tabs { display: none !important; }
+
+.metis-nav {
+  position: fixed;
+  top: 16px; left: 0; right: 0;
+  z-index: 1050;
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+  pointer-events: none;            /* gaps pass clicks through; pill re-enables */
+}
+.metis-nav__pill {
+  pointer-events: auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: 1040px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(20, 23, 46, 0.55);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  border-radius: 999px;
+  padding: 8px 22px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35);
+}
+
+.metis-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #eef1f8;
+  cursor: pointer;
+  text-decoration: none;
+}
+.metis-mark { width: 28px; height: 28px; }
+.metis-wordmark {
+  font-family: 'Cinzel', Georgia, serif;
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: 0.28em;
+  padding-left: 0.28em;
+  line-height: 1;
+  color: #eef1f8;
+}
+
+/* links absolutely centered in the pill regardless of brand width */
+.metis-links {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.metis-link {
+  position: relative;
+  cursor: pointer;
+  color: #9aa1bd;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 999px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color .2s ease, background .2s ease;
+}
+.metis-link:hover { color: #eef1f8; background: rgba(255, 255, 255, 0.06); }
+.metis-link.active { color: #eef1f8; }
+.metis-link.active::after {
+  content: '';
+  position: absolute;
+  left: 14px; right: 14px; bottom: 3px;
+  height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, #90EE90, #18BC9C);
+}
+
+/* push normal tab content below the fixed navbar */
+.tab-content { padding-top: var(--metis-nav-space); }
+
+/* Home tab = full-bleed landing iframe (navbar floats over it, like the
+   standalone). Negative margins cancel container-fluid + tab-content padding. */
+.metis-home {
+  margin: calc(var(--metis-nav-space) * -1) -70px -40px;
+  height: 100vh;
+  overflow: hidden;
+}
+.metis-home__frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* light/dark switcher button */
+.metis-toggle {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 34px; height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: rgba(238, 241, 248, 0.85);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .2s ease, color .2s ease, border-color .2s ease;
+}
+.metis-toggle:hover { background: rgba(255, 255, 255, 0.08); color: #eef1f8; }
+
+/* light variant: navbar adapts (the landing iframe is themed via postMessage) */
+body.metis-light .metis-nav__pill {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(31, 42, 68, 0.12);
+  box-shadow: 0 8px 40px rgba(31, 42, 68, 0.12);
+}
+body.metis-light .metis-brand,
+body.metis-light .metis-wordmark { color: #1f2a44; }
+body.metis-light .metis-link { color: #5a6278; }
+body.metis-light .metis-link:hover { color: #1f2a44; background: rgba(31, 42, 68, 0.06); }
+body.metis-light .metis-link.active { color: #1f2a44; }
+body.metis-light .metis-toggle { color: #1f2a44; border-color: rgba(31, 42, 68, 0.18); }
+body.metis-light .metis-toggle:hover { background: rgba(31, 42, 68, 0.06); }
+
+/* ============================================================================
+ * METIS — App-wide light mode
+ * ----------------------------------------------------------------------------
+ * The switcher toggles `metis-light` on <body>. Most content already works:
+ * cards/inputs are light (bslib bg) with dark text, and accent panels/buttons
+ * carry their own background + white text. So light mode is mainly flipping the
+ * dark page background and giving the now-light cards some definition.
+ * ============================================================================ */
+body.metis-light { background-color: #eef1f6; color: #1f2a44; }
+
+/* card / wellPanel definition on a light page */
+body.metis-light .well {
+  background-color: #ffffff;
+  border: 1px solid rgba(31, 42, 68, 0.08);
+  box-shadow: 0 1px 3px rgba(31, 42, 68, 0.06);
+}
+
+/* legacy fixed chrome, if rendered */
+body.metis-light footer {
+  background-color: #ffffff;
+  color: #1f2a44;
+  border-top: 1px solid rgba(31, 42, 68, 0.08);
+}
+
+/* white-on-dark helpers that need flipping on a light page */
+body.metis-light #loading-time { color: #1f2a44; }
+
+/* --- sidebar: light variant --- */
+body.metis-light .ml-sidebar {
+  background: #ffffff;
+  border-right: 1px solid rgba(31, 42, 68, 0.10);
+  box-shadow: 8px 0 30px rgba(31, 42, 68, 0.10);
+}
+body.metis-light .ml-sidebar h4 { color: #1f2a44; }
+body.metis-light .ml-sidebar-section-title { color: rgba(31, 42, 68, 0.50); }
+body.metis-light .ml-sidebar-item {
+  background: rgba(31, 42, 68, 0.04);
+  border-color: rgba(31, 42, 68, 0.08);
+  color: #2a3350;
+}
+body.metis-light .ml-sidebar-item:hover {
+  background: rgba(24, 188, 156, 0.10);
+  border-left-color: #0e8f78;
+  color: #14233a;
+}
+body.metis-light .ml-sidebar-item.active {
+  background: rgba(24, 188, 156, 0.16);
+  border-left-color: #0e8f78;
+  color: #0f1b2e;
+}
+body.metis-light .ml-sidebar-toggle {
+  background: #ffffff;
+  color: #0e8f78;
+  border-color: rgba(31, 42, 68, 0.12);
+}
+body.metis-light .ml-sidebar-toggle:hover { background: rgba(24, 188, 156, 0.12); color: #0f1b2e; }
+body.metis-light .ml-sidebar::-webkit-scrollbar-track { background: rgba(31, 42, 68, 0.06); }
+
+@media (max-width: 760px) {
+  .metis-links { display: none; }   /* mobile: brand only for now */
 }

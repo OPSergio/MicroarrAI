@@ -149,7 +149,7 @@ ui_ml <- function() {
           
           # Info Banner
           tags$div(
-            style = "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 20px; margin-bottom: 30px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);",
+            style = "background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); border-radius: 12px; padding: 20px; margin-bottom: 30px; box-shadow: 0 4px 15px rgba(24, 188, 156, 0.3);",
             tags$h4("Configure Your Analysis Pipeline", style = "color: white; margin: 0 0 10px 0; font-weight: 600;"),
             tags$p(
               style = "color: rgba(255,255,255,0.95); margin: 0; font-size: 14px; line-height: 1.6;",
@@ -164,7 +164,7 @@ ui_ml <- function() {
                 style = "background: white; border-radius: 8px; padding: 20px; margin-bottom: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);",
                 tags$div(
                   style = "display: flex; align-items: center; margin-bottom: 15px;",
-                  icon("bullseye", style = "font-size: 20px; color: #667eea; margin-right: 10px;"),
+                  icon("bullseye", style = "font-size: 20px; color: #17a589; margin-right: 10px;"),
                   tags$h5("Target Variable", style = "color: #191c32; margin: 0; font-weight: 600;")
                 ),
                 uiOutput("ml_target_selector"),
@@ -197,8 +197,8 @@ ui_ml <- function() {
               tags$div(
                 style = "background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); height: 100%;",
                 tags$div(
-                  style = "display: flex; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 2px solid #667eea;",
-                  icon("project-diagram", style = "font-size: 20px; color: #667eea; margin-right: 10px;"),
+                  style = "display: flex; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 2px solid #17a589;",
+                  icon("project-diagram", style = "font-size: 20px; color: #17a589; margin-right: 10px;"),
                   tags$h5("Unsupervised Learning", style = "color: #191c32; margin: 0; font-weight: 600;")
                 ),
                 tags$p(
@@ -273,8 +273,8 @@ ui_ml <- function() {
               tags$div(
                 style = "background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); height: 100%;",
                 tags$div(
-                  style = "display: flex; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 2px solid #667eea;",
-                  icon("brain", style = "font-size: 20px; color: #667eea; margin-right: 10px;"),
+                  style = "display: flex; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 2px solid #17a589;",
+                  icon("brain", style = "font-size: 20px; color: #17a589; margin-right: 10px;"),
                   tags$h5("Supervised Learning", style = "color: #191c32; margin: 0; font-weight: 600;")
                 ),
                 tags$p(
@@ -382,7 +382,7 @@ ui_ml <- function() {
                     "Run ML Pipeline"
                   ),
                   class = "btn-primary",
-                  style = "font-size: 18px; padding: 15px 40px; font-weight: 600; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);"
+                  style = "font-size: 18px; padding: 15px 40px; font-weight: 600; box-shadow: 0 4px 15px rgba(24, 188, 156, 0.4);"
                 ),
                 tags$p(
                   "Click to start the analysis with your selected configuration",
@@ -408,7 +408,7 @@ ui_ml <- function() {
           fluidRow(
             column(12,
               tags$div(
-                style = "background: #f0f0f0; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #667eea;",
+                style = "background: #f0f0f0; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #17a589;",
                 tags$h5("About Hierarchical Clustering", style = "color: #191c32; margin-top: 0; font-weight: 600;"),
                 tags$p(
                   "Hierarchical clustering groups similar samples and features based on their expression patterns. The dendrogram (tree structure) shows relationships between samples, with shorter branches indicating higher similarity. This visualization helps identify sample clusters and outliers.",
@@ -721,7 +721,7 @@ ui_ml <- function() {
             column(12,
               tags$div(
                 id = "ml_send_biomarkers_section",
-                style = "display: none; margin-top: 25px; text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);",
+                style = "display: none; margin-top: 25px; text-align: center; background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(24, 188, 156, 0.3);",
                 tags$h5(
                   style = "color: white; margin-top: 0; font-weight: 600; font-size: 16px;",
                   icon("dna", style = "margin-right: 10px;"),
@@ -738,7 +738,7 @@ ui_ml <- function() {
                     "Send to Protein Visualization →"
                   ),
                   class = "btn-light",
-                  style = "font-size: 14px; padding: 12px 35px; font-weight: 600; background: white; color: #667eea; border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.2);"
+                  style = "font-size: 14px; padding: 12px 35px; font-weight: 600; background: white; color: #17a589; border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.2);"
                 )
               )
             )

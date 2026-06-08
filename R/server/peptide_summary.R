@@ -96,7 +96,7 @@ calculate_peptide_summary <- function(peptide_data, expression_threshold = 3) {
 
 #' Create Interactive Donut Chart for Isotype Distribution
 create_isotype_donut_chart <- function(isotype_summary, 
-                                       colors = c("#191c32", "#667eea", "#00A087FF")) {
+                                       colors = c("#191c32", "#17a589", "#00A087FF")) {
   
   # Calculate percentages and coordinates for donut chart
   isotype_summary <- isotype_summary %>%
@@ -232,7 +232,7 @@ create_expression_distribution_plot <- function(peptide_data) {
   p <- ggplot(expression_values, aes(x = expression, fill = Isotype)) +
     geom_histogram(alpha = 0.8, bins = 40) +
     facet_wrap(~Isotype, ncol = 1, scales = "free_y") +
-    scale_fill_manual(values = c("IgE" = "#667eea", "IgG4" = "#00A087FF", "Other" = "#4DBBD5FF")) +
+    scale_fill_manual(values = c("IgE" = "#17a589", "IgG4" = "#00A087FF", "Other" = "#4DBBD5FF")) +
     labs(
       title = "Expression Distribution by Isotype",
       x = "Expression Value", 

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>METIS — Frontend Lab</title>
+  <link rel="icon" type="image/svg+xml" href="assets/metis-mark.svg" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- NGL molecular viewer -->
+  <script src="https://cdn.jsdelivr.net/npm/ngl@2.0.0-dev.37/dist/ngl.js"></script>
+
+  <!-- Tailwind Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            // driven by CSS variables in styles.css so we can flip light/dark
+            bg:        'rgb(var(--c-bg) / <alpha-value>)',
+            'bg-deep': 'rgb(var(--c-bg-deep) / <alpha-value>)',
+            ink:       'rgb(var(--c-ink) / <alpha-value>)',
+            muted:     'rgb(var(--c-muted) / <alpha-value>)',
+            brand: { green: '#90EE90', greendk: '#00a86b', orange: '#ff6b35', teal: '#18BC9C' },
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            display: ['Space Grotesk', 'sans-serif'],
+            serif: ['Cinzel', 'Georgia', 'serif'],
+          },
+          keyframes: {
+            'fade-up': { '0%': { opacity: 0, transform: 'translateY(28px)' }, '100%': { opacity: 1, transform: 'translateY(0)' } },
+            wheel: { '0%': { opacity: 0, top: '8px' }, '40%': { opacity: 1 }, '100%': { opacity: 0, top: '18px' } },
+            'pulse-soft': { '0%,100%': { opacity: .55 }, '50%': { opacity: 1 } },
+          },
+          animation: {
+            'fade-up': 'fade-up .7s ease both',
+            wheel: 'wheel 1.6s ease infinite',
+            'pulse-soft': 'pulse-soft 2.4s ease infinite',
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Component classes compiled by the Tailwind Play CDN (must be inline) -->
+  <style type="text/tailwindcss">
+    @layer components {
+      .nav-link {
+        @apply relative rounded-full px-3.5 py-2 text-sm font-medium text-muted transition
+               hover:text-ink hover:bg-white/5;
+      }
+      .nav-link.is-active { @apply text-ink; }
+      .nav-link.is-active::after {
+        content: '';
+        @apply absolute inset-x-3.5 bottom-1 h-0.5 rounded;
+        background: linear-gradient(90deg, #90EE90, #18BC9C);
+      }
+
+      .mnav { @apply block rounded-xl px-4 py-3 text-sm font-medium text-muted transition hover:bg-white/5 hover:text-ink; }
+
+      .btn-primary {
+        @apply rounded-full px-6 py-3 text-[15px] font-semibold text-[#0e1726]
+               bg-gradient-to-r from-brand-green to-brand-teal
+               shadow-[0_6px_20px_rgba(24,188,156,0.3)] transition
+               hover:-translate-y-0.5 hover:shadow-[0_10px_28px_rgba(24,188,156,0.45)];
+      }
+      .btn-ghost {
+        @apply rounded-full px-6 py-3 text-[15px] font-semibold text-ink
+               border border-white/10 bg-white/5 transition hover:bg-white/10;
+      }
+
+      /* No backdrop-blur here on purpose: blurring a large area over a canvas
+         that re-renders every frame (the spin) forces the blur to recompute
+         each frame and tanks scroll perf. A more opaque bg reads just as well. */
+      .card {
+        @apply max-w-lg rounded-3xl border border-white/10 bg-bg-deep/85
+               p-8 sm:p-9 shadow-[0_24px_60px_rgba(0,0,0,0.35)];
+      }
+      .step    { @apply inline-block text-[12.5px] font-semibold uppercase tracking-[0.12em] text-brand-teal mb-3.5; }
+      .card-h2 { @apply font-display tracking-tight leading-[1.1] text-[clamp(26px,3.4vw,40px)] mb-4; }
+      .card-p  { @apply text-base leading-relaxed text-ink/80 mb-3.5; }
+
+      .highlight-green  { @apply font-semibold rounded-xl px-4 py-3 border-l-[3px] border-brand-green  text-[#d7ffd7] bg-brand-green/10; }
+      .highlight-orange { @apply font-semibold rounded-xl px-4 py-3 border-l-[3px] border-brand-orange text-[#ffd9c9] bg-brand-orange/10; }
+    }
+  </style>
+
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+
+<body class="bg-bg text-ink font-sans antialiased selection:bg-brand-teal/30">
+
+  <!-- ============================================================
+       FIXED 3D PROTEIN STAGE  (scroll-reactive backdrop)
+  ============================================================ -->
+  <div class="fixed inset-0 z-0 scene-bg" id="scene">
+    <div id="viewport" class="absolute inset-0"></div>
+
+    <!-- subtle grid overlay -->
+    <div class="pointer-events-none absolute inset-0 grid-overlay"></div>
+
+    <div id="sceneLoading" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-3 text-muted text-sm">
+      <div class="h-8 w-8 rounded-full border-[3px] border-white/15 border-t-brand-green animate-spin"></div>
+      <span>Loading structure…</span>
+    </div>
+
+    <!-- floating status chip narrating the protein -->
+    <div id="sceneChip"
+         class="absolute left-1/2 bottom-9 -translate-x-1/2 translate-y-2 opacity-0 transition-all duration-500
+                px-4 py-2 rounded-full text-[12.5px] font-medium tracking-wide
+                bg-bg/55 backdrop-blur-md border border-white/10 pointer-events-none">
+      Structure loaded
+    </div>
+  </div>
+
+  <!-- scroll progress rail -->
+  <div class="fixed top-0 inset-x-0 h-[3px] z-[60]">
+    <span id="progressBar" class="block h-full w-0 bg-gradient-to-r from-brand-green via-brand-teal to-brand-orange transition-[width] duration-150"></span>
+  </div>
+
+  <!-- ============================================================
+       FLOATING GLASS NAVBAR  (21st-style pill)
+  ============================================================ -->
+  <header id="nav" class="fixed top-4 inset-x-0 z-50 flex justify-center px-4">
+    <div class="flex items-center gap-2 sm:gap-4 w-full max-w-5xl
+                rounded-full border border-white/10 bg-bg/50 backdrop-blur-xl
+                shadow-[0_8px_40px_rgba(0,0,0,0.35)] pl-3 pr-2 py-2">
+
+      <a href="#hero" class="flex items-center gap-2.5 shrink-0 select-none text-ink">
+        <svg viewBox="0 0 100 100" fill="none" class="h-7 w-7" aria-hidden="true">
+          <circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="2.2" />
+          <path d="M40 72 C 40 56 46 42 58 30" stroke="#c2a878" stroke-width="1.8" stroke-linecap="round" />
+          <g fill="#c2a878">
+            <ellipse cx="41" cy="66" rx="6.6" ry="2.6" transform="rotate(-62 41 66)" />
+            <ellipse cx="44" cy="58" rx="7.0" ry="2.7" transform="rotate(-58 44 58)" />
+            <ellipse cx="48" cy="49" rx="7.2" ry="2.8" transform="rotate(-52 48 49)" />
+            <ellipse cx="52" cy="40" rx="7.0" ry="2.7" transform="rotate(-46 52 40)" />
+            <ellipse cx="57" cy="31" rx="6.4" ry="2.5" transform="rotate(-40 57 31)" />
+          </g>
+        </svg>
+        <span class="font-serif text-[17px] font-medium tracking-[0.28em] leading-none pr-1">METIS</span>
+      </a>
+
+      <nav id="navLinks" class="hidden md:flex items-center gap-1 mx-auto">
+        <a href="#preprocessing" class="nav-link">Preprocessing</a>
+        <a href="#peptides"      class="nav-link">Peptide selection</a>
+        <a href="#ml"            class="nav-link">Machine learning</a>
+        <a href="#viz"           class="nav-link">3D visualization</a>
+        <a href="#docs"          class="nav-link">Docs</a>
+      </nav>
+
+      <button id="themeToggle" aria-label="Toggle light/dark"
+              class="ml-auto md:ml-0 grid place-items-center h-9 w-9 shrink-0 rounded-full border border-white/10 text-ink/80 text-[15px] leading-none transition hover:bg-white/10">
+        ☀
+      </button>
+      <a href="#" class="shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-[#0e1726]
+                          bg-gradient-to-r from-brand-green to-brand-teal
+                          shadow-[0_4px_16px_rgba(24,188,156,0.3)] transition hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgba(24,188,156,0.45)]">
+        Launch app
+      </a>
+
+      <button id="navBurger" class="md:hidden p-2 -mr-1" aria-label="Menu">
+        <div class="space-y-[5px]"><span class="block h-0.5 w-5 bg-ink rounded"></span><span class="block h-0.5 w-5 bg-ink rounded"></span><span class="block h-0.5 w-5 bg-ink rounded"></span></div>
+      </button>
+    </div>
+
+    <!-- mobile menu -->
+    <div id="mobileMenu" class="hidden absolute top-[68px] inset-x-4 rounded-2xl border border-white/10 bg-bg/80 backdrop-blur-xl p-2 flex-col">
+      <a href="#preprocessing" class="mnav">Preprocessing</a>
+      <a href="#peptides"      class="mnav">Peptide selection</a>
+      <a href="#ml"            class="mnav">Machine learning</a>
+      <a href="#viz"           class="mnav">3D visualization</a>
+      <a href="#docs"          class="mnav">Docs</a>
+    </div>
+  </header>
+
+  <!-- ============================================================
+       SCROLL STORY  (panels float over the protein)
+  ============================================================ -->
+  <main class="relative z-10">
+
+    <!-- HERO -->
+    <section id="hero" data-stage="intro" class="panel min-h-screen flex items-center justify-center text-center px-6 pt-28 pb-16">
+      <div class="reveal spot max-w-3xl">
+        <span class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs font-medium text-muted backdrop-blur">
+          <span class="h-1.5 w-1.5 rounded-full bg-brand-green animate-pulse-soft"></span>
+          Peptide microarray intelligence
+        </span>
+        <h1 class="font-display font-bold tracking-tight leading-[1.04] mt-6 text-[clamp(40px,6.5vw,72px)]">
+          Turn raw arrays into<br />
+          <span class="grad">immunogenic insight</span>
+        </h1>
+        <p class="mx-auto mt-6 max-w-xl text-[clamp(16px,1.6vw,19px)] leading-relaxed text-muted">
+          MicroarrAI walks your data from raw signal to candidate biomarkers — and maps
+          them straight onto the 3D structure of the protein. Scroll to watch it happen.
+        </p>
+        <div class="mt-9 flex flex-wrap items-center justify-center gap-3">
+          <a href="#preprocessing" class="btn-primary">See how it works</a>
+          <a href="#" class="btn-ghost">Launch the platform</a>
+        </div>
+        <div class="mt-12 flex flex-col items-center gap-2 text-[11px] tracking-[0.25em] uppercase text-muted">
+          <span class="relative h-9 w-[22px] rounded-xl border-2 border-muted">
+            <span class="absolute left-1/2 -translate-x-1/2 h-[7px] w-[3px] rounded bg-brand-green animate-wheel"></span>
+          </span>
+          scroll
+        </div>
+      </div>
+    </section>
+
+    <!-- PREPROCESSING -->
+    <section id="preprocessing" data-stage="intro" class="panel min-h-screen flex items-center justify-start px-6 sm:px-12 lg:px-24 pt-28 pb-16">
+      <div class="reveal card">
+        <span class="step">01 — Preprocessing</span>
+        <h2 class="card-h2">Clean signal, honest baseline</h2>
+        <p class="card-p">
+          Arrays are background-corrected spot by spot, non-specific signal is removed using
+          negative controls, and the matrix is normalized — z-score, median scaling or quantile.
+          Zero-variance features are dropped automatically.
+        </p>
+        <p class="text-muted text-sm">The protein stays neutral. No conclusions drawn yet.</p>
+      </div>
+    </section>
+
+    <!-- DIFFERENTIAL ANALYSIS -> COLOR -->
+    <section id="peptides" data-stage="color" class="panel min-h-screen flex items-center justify-end px-6 sm:px-12 lg:px-24 pt-28 pb-16">
+      <div class="reveal card">
+        <span class="step">02 — Differential analysis</span>
+        <h2 class="card-h2">Where the signal lives</h2>
+        <p class="card-p">
+          Parametric and non-parametric tests, GLM/LM models, AUC, BH-adjusted p-values and
+          fold-change surface the peptides that truly separate conditions.
+        </p>
+        <p class="highlight-green">Watch the structure light up — expression is now painted onto the residues.</p>
+      </div>
+    </section>
+
+    <!-- MACHINE LEARNING -> BIOMARKERS APPEAR -->
+    <section id="ml" data-stage="biomarkers" class="panel min-h-screen flex items-center justify-start px-6 sm:px-12 lg:px-24 pt-28 pb-16">
+      <div class="reveal card">
+        <span class="step">03 — Machine learning</span>
+        <h2 class="card-h2">The biomarkers emerge</h2>
+        <p class="card-p">
+          Random Forest, C5.0 and SVM-RFE rank the features that matter. The most informative
+          peptides rise to the surface as candidate biomarkers.
+        </p>
+        <p class="highlight-orange">The biomarker residues now stand out on the protein in orange.</p>
+      </div>
+    </section>
+
+    <!-- 3D VISUALIZATION -> FOCUS -->
+    <section id="viz" data-stage="focus" class="panel min-h-screen flex items-center justify-end px-6 sm:px-12 lg:px-24 pt-28 pb-16">
+      <div class="reveal card">
+        <span class="step">04 — 3D visualization</span>
+        <h2 class="card-h2">Read them in context</h2>
+        <p class="card-p">
+          Candidate peptides are mapped onto the AlphaFold structure so you can judge
+          accessibility and immune-receptor interaction in space — not just on a list.
+        </p>
+        <a href="#" class="btn-primary mt-2 inline-block">Open the 3D explorer</a>
+      </div>
+    </section>
+
+    <!-- CLOSING -->
+    <section id="docs" data-stage="focus" class="panel min-h-screen flex items-center justify-center text-center px-6 pt-28 pb-24">
+      <div class="reveal spot max-w-3xl">
+        <h2 class="font-display font-bold tracking-tight leading-[1.05] text-[clamp(34px,6vw,64px)]">
+          From <span class="grad">microarray</span> to <span class="grad">marker</span>.
+        </h2>
+        <p class="mt-5 text-[clamp(16px,1.6vw,19px)] text-muted">One platform, end to end.</p>
+        <a href="#" class="btn-primary mt-8 inline-block">Get started</a>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============================================================
+       FOOTER  (white, institutional logos)
+  ============================================================ -->
+  <footer class="relative z-10 bg-white text-[#1f2a44]">
+    <div class="mx-auto max-w-6xl px-6 py-16">
+
+      <!-- METIS lockup -->
+      <div class="flex flex-col items-center gap-3 text-[#1f2a44]">
+        <img src="assets/metis-mark.svg" alt="METIS" class="h-14 w-14" />
+        <span class="font-serif text-[22px] font-medium tracking-[0.34em] pl-[0.34em] leading-none">METIS</span>
+      </div>
+
+      <p class="mt-12 text-center text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-400">
+        Developed at
+      </p>
+
+      <div class="mt-9 flex flex-wrap items-center justify-center gap-x-14 gap-y-10 sm:gap-x-20">
+        <img src="assets/IRYCIS.png"   alt="Instituto Ramón y Cajal de Investigación Sanitaria (IRYCIS)" class="h-12 sm:h-14 w-auto object-contain" />
+        <img src="assets/Hospital.PNG" alt="Hospital Universitario Ramón y Cajal" class="h-11 sm:h-12 w-auto object-contain" />
+        <img src="assets/logo.png"     alt="Unidad de Microarrays" class="h-12 sm:h-14 w-auto object-contain" />
+      </div>
+
+      <div class="mt-12 border-t border-black/10 pt-8 text-center">
+        <p class="text-sm leading-7 text-neutral-500">
+          Sergio Olmos Piñero · Val Fernández Lanza · Javier Martínez-Botas ·
+          Belén de la Hoz Caballer · Miguel Ángel Sicilia Urban
+        </p>
+        <p class="mt-3 text-xs text-neutral-400">
+          © 2026 METIS — Peptide microarray intelligence
+        </p>
+      </div>
+
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>

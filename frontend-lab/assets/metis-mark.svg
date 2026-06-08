@@ -1,0 +1,14 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <!-- ring -->
+  <circle cx="50" cy="50" r="40" stroke="#1f2a44" stroke-width="2.2"/>
+  <!-- laurel stem -->
+  <path d="M40 72 C 40 56 46 42 58 30" stroke="#c2a878" stroke-width="1.8" stroke-linecap="round"/>
+  <!-- laurel leaves -->
+  <g fill="#c2a878">
+    <ellipse cx="41" cy="66" rx="6.6" ry="2.6" transform="rotate(-62 41 66)"/>
+    <ellipse cx="44" cy="58" rx="7.0" ry="2.7" transform="rotate(-58 44 58)"/>
+    <ellipse cx="48" cy="49" rx="7.2" ry="2.8" transform="rotate(-52 48 49)"/>
+    <ellipse cx="52" cy="40" rx="7.0" ry="2.7" transform="rotate(-46 52 40)"/>
+    <ellipse cx="57" cy="31" rx="6.4" ry="2.5" transform="rotate(-40 57 31)"/>
+  </g>
+</svg>
