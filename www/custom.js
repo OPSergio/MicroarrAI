@@ -13,6 +13,9 @@ function metisNav(tab, el) {
   if (window.Shiny) Shiny.setInputValue('nav_target', tab, { priority: 'event' });
   document.querySelectorAll('.metis-link').forEach(function (l) { l.classList.remove('active'); });
   if (el) el.classList.add('active');
+  // Always start a freshly opened tab at the top (not wherever the last one was)
+  window.scrollTo({ top: 0, behavior: 'auto' });
+  setTimeout(function () { window.scrollTo({ top: 0, behavior: 'auto' }); }, 80);
 }
 
 /**

@@ -13,7 +13,14 @@
 ui_ml <- function() {
   tabPanel(
     title = "Machine Learning",
-    
+
+    tags$head(
+      tags$script(src = "https://d3js.org/d3.v7.min.js"),
+      tags$script(src = "venn_d3.js")
+    ),
+
+    loading_overlay(id = "ml_loader", label = "Training models…"),
+
     # Floating Sidebar
     tags$div(
       id = "ml-sidebar",
@@ -698,7 +705,7 @@ ui_ml <- function() {
           fluidRow(
             column(7,
               tags$h5("Feature Overlap Visualization", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
-              shinycssloaders::withSpinner(plotOutput("venn.plot", height = "450px"))
+              tags$div(id = "venn-d3", style = "width:100%; min-height:430px;")
             ),
             column(5,
               tags$div(

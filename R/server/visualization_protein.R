@@ -25,7 +25,7 @@ server_protein_viz <- function(input, output, session,
     } else if (!is.null(target)) {
       target
     } else {
-      "Risk2"  # Default
+      "group"  # Default
     }
   })
   
@@ -74,28 +74,33 @@ server_protein_viz <- function(input, output, session,
       type = "message",
       duration = 2
     )
-    
+
+    shinyjs::show("protein_loader")
     protein_trigger(protein_trigger() + 1)
   })
+
+  # Hide the overlay once the 2D/3D controller reports the structure is rendered
+  observeEvent(input$pv_structure_loaded, shinyjs::hide("protein_loader"))
+  # Safety: also hide it if protein loading failed (invalid UniProt -> NULL)
+  observeEvent(protein_info_data(), {
+    if (is.null(protein_info_data())) shinyjs::hide("protein_loader")
+  }, ignoreNULL = FALSE)
   
   # ============================================================================
   # REACTIVOS: Datos de proteína
   # ============================================================================
   
   protein_info_data <- reactive({
+    req(protein_trigger() > 0)        # only after the user clicks "Load"
     req(input$protein_uniprot_id)
-    protein_trigger()  # Depender del trigger
-    
+
     isolate({
       uniprot_id <- input$protein_uniprot_id
       message("[PROTEIN_INFO] Fetching data for: ", uniprot_id)
       
-      # Validate format
-      if (nchar(uniprot_id) < 6) {
-        showNotification("❌ Invalid UniProt ID", type = "error")
-        return(NULL)
-      }
-      
+      # Need a plausible accession before fetching (silent: no scary disclaimer)
+      req(nchar(uniprot_id) >= 6)
+
       tryCatch({
         protein_info <- get_protein_info(uniprot_id, peptide_length = 20, offset = 3)
         
@@ -195,15 +200,15 @@ server_protein_viz <- function(input, output, session,
         names_to = "peptide",
         values_to = "expr_mean"
       ) %>%
-      dplyr::mutate(Number = as.integer(stringr::str_match(peptide, "_p(\\d+)_")[,2])) %>%
+      dplyr::mutate(Number = as.integer(stringr::str_match(peptide, "_p[ _.-]?(\\d+)_")[,2])) %>%
       dplyr::filter(!is.na(Number))
     
     message("[EXPRESSION_DATA] Peptide numbers range: ", min(peptide_means$Number, na.rm=TRUE), " - ", max(peptide_means$Number, na.rm=TRUE))
     message("[EXPRESSION_DATA] Total rows after pivot: ", nrow(peptide_means))
     
-    # Renombrar columna target a Risk2 para compatibilidad
-    colnames(peptide_means)[colnames(peptide_means) == target] <- "Risk2"
-    message("[EXPRESSION_DATA] Renamed '", target, "' to 'Risk2'")
+    # Renombrar columna target a group para compatibilidad
+    colnames(peptide_means)[colnames(peptide_means) == target] <- "group"
+    message("[EXPRESSION_DATA] Renamed '", target, "' to 'group'")
     
     # Procesar biomarcadores si están disponibles
     message("\n========== [BIOMARKER_MATCH] Starting ==========")
@@ -215,7 +220,7 @@ server_protein_viz <- function(input, output, session,
           message("[BIOMARKER_MATCH] Full list: ", paste(biomarkers_raw, collapse = ", "))
           
           # CRITICAL: Filtrar SOLO los que tienen formato de péptido (contienen "_p\d+_")
-          peptide_biomarkers <- biomarkers_raw[grepl("_p\\d+_", biomarkers_raw)]
+          peptide_biomarkers <- biomarkers_raw[grepl("_p[ _.-]?\\d+_", biomarkers_raw)]
           non_peptide <- setdiff(biomarkers_raw, peptide_biomarkers)
           
           if (length(non_peptide) > 0) {
@@ -231,9 +236,9 @@ server_protein_viz <- function(input, output, session,
             result <- tibble::tibble(raw = peptide_biomarkers) %>%
               dplyr::mutate(
                 # Extraer número DESPUÉS de _p: "IgE_p15_ovoalb_1" → 15
-                Number = as.integer(stringr::str_match(raw, "_p(\\d+)_")[,2]),
+                Number = as.integer(stringr::str_match(raw, "_p[ _.-]?(\\d+)_")[,2]),
                 # Extraer protein_id: "IgE_p15_ovoalb_1" → "ovoalb"
-                protein_id = stringr::str_match(raw, "_p\\d+_([^_]+)")[,2],
+                protein_id = stringr::str_match(raw, "_p[ _.-]?\\d+_([^_]+)")[,2],
                 # Extraer antibody type: "IgE_p15_..." → "IgE"
                 antibody_type = stringr::str_extract(raw, "^(IgE|IgG4)")
               )
@@ -363,11 +368,16 @@ server_protein_viz <- function(input, output, session,
         names_to = "peptide",
         values_to = "expr_mean"
       ) %>%
-      dplyr::mutate(Number = as.integer(stringr::str_match(peptide, "_p(\\d+)_")[,2])) %>%
+      dplyr::mutate(Number = as.integer(stringr::str_match(peptide, "_p[ _.-]?(\\d+)_")[,2])) %>%
       dplyr::filter(!is.na(Number))
-    
-    colnames(peptide_means)[colnames(peptide_means) == target] <- "Risk2"
-    
+
+    if (nrow(peptide_means) == 0) {
+      message("[EXPRESSION_IgE] No positional peptides (e.g. _p11_ / _p_11_) matched; nothing to map.")
+      return(NULL)
+    }
+
+    colnames(peptide_means)[colnames(peptide_means) == target] <- "group"
+
     # Filtrar biomarcadores IgE
     biomarkers_tbl <- if (!is.null(biomarkers) && !is.null(biomarkers())) {
       expression_data()$biomarkers_tbl %>%
@@ -432,11 +442,16 @@ server_protein_viz <- function(input, output, session,
         names_to = "peptide",
         values_to = "expr_mean"
       ) %>%
-      dplyr::mutate(Number = as.integer(stringr::str_match(peptide, "_p(\\d+)_")[,2])) %>%
+      dplyr::mutate(Number = as.integer(stringr::str_match(peptide, "_p[ _.-]?(\\d+)_")[,2])) %>%
       dplyr::filter(!is.na(Number))
-    
-    colnames(peptide_means)[colnames(peptide_means) == target] <- "Risk2"
-    
+
+    if (nrow(peptide_means) == 0) {
+      message("[EXPRESSION_IgG4] No positional peptides (e.g. _p11_ / _p_11_) matched; nothing to map.")
+      return(NULL)
+    }
+
+    colnames(peptide_means)[colnames(peptide_means) == target] <- "group"
+
     # Filtrar biomarcadores IgG4
     biomarkers_tbl <- if (!is.null(biomarkers) && !is.null(biomarkers())) {
       expression_data()$biomarkers_tbl %>%
@@ -553,592 +568,95 @@ server_protein_viz <- function(input, output, session,
     
     result
   })
-  
-  # ============================================================================
-  # OUTPUTS: Snake plots separados por analito
-  # ============================================================================
-  
-  # Snake plot IgE
-  output$protein_snake_ige <- ggiraph::renderGirafe({
-    # Si no se ha activado el trigger, mostrar placeholder
-    if (protein_trigger() == 0) {
-      empty_plot <- ggplot2::ggplot() +
-        ggplot2::annotate(
-          "text", x = 0.5, y = 0.6,
-          label = "🔴 IgE Ready",
-          size = 7, color = "#e74c3c", fontface = "bold"
-        ) +
-        ggplot2::annotate(
-          "text", x = 0.5, y = 0.4,
-          label = "Enter UniProt ID and Regex, then click 'Load and Visualize'",
-          size = 4, color = "#666"
-        ) +
-        ggplot2::theme_void() +
-        ggplot2::xlim(0, 1) +
-        ggplot2::ylim(0, 1)
-      
-      return(ggiraph::girafe(ggobj = empty_plot, width_svg = 12, height_svg = 3.5))
-    }
-    
-    req(protein_info_data())
-    
-    # Validar que hay datos IgE
-    if (is.null(expression_data_ige())) {
-      empty_plot <- ggplot2::ggplot() +
-        ggplot2::annotate(
-          "text", x = 0.5, y = 0.5,
-          label = "No IgE peptides found.\nCheck your regex pattern.",
-          size = 6, color = "#e74c3c"
-        ) +
-        ggplot2::theme_void() +
-        ggplot2::xlim(0, 1) +
-        ggplot2::ylim(0, 1)
-      
-      return(ggiraph::girafe(ggobj = empty_plot, width_svg = 12, height_svg = 3.5))
-    }
-    
-    req(AA_data_ige())
-    
-    plot_data <- AA_data_ige()
-    
-    snake_gg <- create_snake_plot(
-      Protein_plot = plot_data$Protein_plot,
-      PTM_plot = plot_data$PTM_plot,
-      Biomarker_plot = plot_data$Biomarker_plot,
-      Signal_plot = plot_data$Signal_plot,
-      color_palette = "green",  # Green scale for IgE
-      facet_type = "vertical",  # Vertical facets (stacked)
-      aspect_ratio = 0.55       # Optimal aspect ratio
-    )
-    
-    ggiraph::girafe(
-      ggobj = snake_gg,
-      width_svg = 10,
-      height_svg = 9,
-      options = list(
-        ggiraph::opts_hover(css = "stroke-width:3;opacity:1;"),
-        ggiraph::opts_hover_inv(css = "opacity:0.5;"),
-        ggiraph::opts_selection(type = "none"),
-        ggiraph::opts_tooltip(
-          use_fill = FALSE,
-          css = "background-color:rgba(0,0,0,0.85);color:white;padding:8px;border-radius:6px;font-size:12px;"
-        )
-      )
-    )
-  })
-  
-  # Snake plot IgG4
-  output$protein_snake_igg4 <- ggiraph::renderGirafe({
-    # Si no se ha activado el trigger, mostrar placeholder
-    if (protein_trigger() == 0) {
-      empty_plot <- ggplot2::ggplot() +
-        ggplot2::annotate(
-          "text", x = 0.5, y = 0.6,
-          label = "🔵 IgG4 Ready",
-          size = 7, color = "#3498db", fontface = "bold"
-        ) +
-        ggplot2::annotate(
-          "text", x = 0.5, y = 0.4,
-          label = "Enter UniProt ID and Regex, then click 'Load and Visualize'",
-          size = 4, color = "#666"
-        ) +
-        ggplot2::theme_void() +
-        ggplot2::xlim(0, 1) +
-        ggplot2::ylim(0, 1)
-      
-      return(ggiraph::girafe(ggobj = empty_plot, width_svg = 12, height_svg = 3.5))
-    }
-    
-    req(protein_info_data())
-    
-    # Validar que hay datos IgG4
-    if (is.null(expression_data_igg4())) {
-      empty_plot <- ggplot2::ggplot() +
-        ggplot2::annotate(
-          "text", x = 0.5, y = 0.5,
-          label = "No IgG4 peptides found.\nCheck your regex pattern.",
-          size = 6, color = "#3498db"
-        ) +
-        ggplot2::theme_void() +
-        ggplot2::xlim(0, 1) +
-        ggplot2::ylim(0, 1)
-      
-      return(ggiraph::girafe(ggobj = empty_plot, width_svg = 12, height_svg = 3.5))
-    }
-    
-    req(AA_data_igg4())
-    
-    plot_data <- AA_data_igg4()
-    
-    snake_gg <- create_snake_plot(
-      Protein_plot = plot_data$Protein_plot,
-      PTM_plot = plot_data$PTM_plot,
-      Biomarker_plot = plot_data$Biomarker_plot,
-      Signal_plot = plot_data$Signal_plot,
-      color_palette = "red",    # Red scale for IgG4
-      facet_type = "vertical",  # Vertical facets (stacked)
-      aspect_ratio = 0.55       # Optimal aspect ratio
-    )
-    
-    ggiraph::girafe(
-      ggobj = snake_gg,
-      width_svg = 10,
-      height_svg = 9,
-      options = list(
-        ggiraph::opts_hover(css = "stroke-width:3;opacity:1;"),
-        ggiraph::opts_hover_inv(css = "opacity:0.5;"),
-        ggiraph::opts_selection(type = "none"),
-        ggiraph::opts_tooltip(
-          use_fill = FALSE,
-          css = "background-color:rgba(0,0,0,0.85);color:white;padding:8px;border-radius:6px;font-size:12px;"
-        )
-      )
-    )
-  })
 
-  
   # ============================================================================
-  # OUTPUTS: NGL Viewers 3D separados por analito
+  # OUTPUT: feed the D3 (2D) + 3Dmol (3D) controller with real pipeline data
   # ============================================================================
-  
-  # 3D Viewer para IgE
-  output$protein_3d_ige <- renderUI({
-    # Solo mostrar iframe si se ha cargado la proteína
-    if (protein_trigger() == 0) {
-      tags$div(
-        style = "width: 100%; height: 600px; display: flex; align-items: center; justify-content: center; background: #ffe6e6; border: 2px dashed #e74c3c; border-radius: 10px;",
-        tags$div(
-          style = "text-align: center; color: #666;",
-          tags$h4(style = "color: #e74c3c; margin-bottom: 10px;", "🔴 IgE 3D Structure"),
-          tags$p("Click 'Load and Visualize' to load the protein structure")
-        )
-      )
-    } else {
-      tags$iframe(
-        src = "ngl_viewer.html?target=ige",
-        width = "100%",
-        height = "600px",
-        style = "border:none; border-radius:10px;"
-      )
-    }
-  })
-  
-  # 3D Viewer para IgG4
-  output$protein_3d_igg4 <- renderUI({
-    # Solo mostrar iframe si se ha cargado la proteína
-    if (protein_trigger() == 0) {
-      tags$div(
-        style = "width: 100%; height: 600px; display: flex; align-items: center; justify-content: center; background: #e6f2ff; border: 2px dashed #3498db; border-radius: 10px;",
-        tags$div(
-          style = "text-align: center; color: #666;",
-          tags$h4(style = "color: #3498db; margin-bottom: 10px;", "🔵 IgG4 3D Structure"),
-          tags$p("Click 'Load and Visualize' to load the protein structure")
-        )
-      )
-    } else {
-      tags$iframe(
-        src = "ngl_viewer.html?target=igg4",
-        width = "100%",
-        height = "600px",
-        style = "border:none; border-radius:10px;"
-      )
-    }
-  })
-  
-  # ============================================================================
-  # OUTPUTS: Info de proteína
-  # ============================================================================
-  
+
+  `%||%` <- function(a, b) if (is.null(a)) b else a
+  na_false <- function(x) ifelse(is.na(x), FALSE, x)
+  rows_list <- function(df) lapply(seq_len(nrow(df)), function(i) as.list(df[i, ]))
+
   output$protein_info_display <- renderUI({
     req(protein_info_data())
-    
     info <- protein_info_data()
-    
     tagList(
       tags$strong("Protein Information:"),
       tags$ul(
         tags$li(paste("Signal peptide:", info$signal_length, "AA")),
         tags$li(paste("Total:", nrow(info$uniprot_info), "AA")),
-        tags$li(paste("Peptides:", max(info$Structure_info$Number, na.rm = TRUE)))
+        tags$li(paste("Peptides:", max(info$Structure_info$Number, na.rm = TRUE))),
+        tags$li(paste("Disulfides:", length(info$disulfides %||% list())))
       )
     )
   })
-  
-  # ============================================================================
-  # OBSERVERS: Comunicación con NGL Viewer
-  # ============================================================================
-  
-  # Preparar datos de biomarcadores para NGL (todos los péptidos)
-  biomarker_data <- reactive({
-    req(protein_info_data())
-    
-    # Validar que tengamos datos de expresión
-    if (is.null(expression_data())) {
-      return(list(
-        biomarker_resi = integer(0),
-        biomarker_resi_ngl = integer(0),
-        signal_length = protein_info_data()$signal_length,
-        num_biomarkers = 0
-      ))
-    }
-    
-    Structure_info <- protein_info_data()$Structure_info
-    signal_length <- protein_info_data()$signal_length
-    
-    # Función auxiliar
-    make_resi_list_for_numbers <- function(nums) {
-      sort(unique(Structure_info$Pos[Structure_info$Number %in% nums]))
-    }
-    
-    # Obtener números de biomarcadores
-    biomarker_nums <- if (!is.null(expression_data()$biomarkers_tbl) && nrow(expression_data()$biomarkers_tbl) > 0) {
-      expression_data()$biomarkers_tbl$Number
-    } else {
-      integer(0)
-    }
-    
-    biomarker_resi <- if (length(biomarker_nums) > 0) {
-      make_resi_list_for_numbers(biomarker_nums)
-    } else {
-      integer(0)
-    }
-    
-    # Notify biomarkers found
-    if (length(biomarker_nums) > 0) {
-      showNotification(
-        paste("🎯", length(biomarker_nums), "biomarkers identified for this protein"),
-        type = "message",
-        duration = 3
-      )
-    }
-    
-    list(
-      biomarker_resi = biomarker_resi,
-      biomarker_resi_ngl = if (length(biomarker_resi) > 0) biomarker_resi - signal_length else integer(0),
-      signal_length = signal_length,
-      num_biomarkers = length(biomarker_nums)
-    )
+
+  # Clinical group levels (group selector + Δ-groups mode)
+  protein_groups <- reactive({
+    req(clinical_data(), target_var())
+    levels(factor(clinical_data()[[target_var()]]))
   })
-  
-  # Inicializar NGL cuando esté listo
-  observeEvent(input$molstar_ready, {
-    message("\n========== [MOLSTAR_READY] EVENT TRIGGERED ==========")
-    message("[MOLSTAR_READY] input$molstar_ready value: ", input$molstar_ready)
-    message("[MOLSTAR_READY] protein_info_data available: ", !is.null(protein_info_data()))
-    message("[MOLSTAR_READY] input$protein_uniprot_id: ", input$protein_uniprot_id)
-    
-    req(protein_info_data(), input$protein_uniprot_id)
-    
-    # Validar que tenemos datos de expresión
-    if (is.null(AA_data())) {
-      message("[MOLSTAR_READY] ⚠️ NGL Viewer ready but no expression data available yet")
-      return()
-    }
-    
-    message("[MOLSTAR_READY] ✅ All data available, initializing 3D viewer...")
-    message("[MOLSTAR_READY] Loading structure for UniProt: ", input$protein_uniprot_id)
-    
-    # Cargar estructura
-    session$sendCustomMessage(
-      type = "send_to_molstar",
-      message = list(
-        type = "load_structure",
-        uniprot_id = input$protein_uniprot_id
-      )
-    )
-    
-    bm_data <- biomarker_data()
-    signal_length <- bm_data$signal_length
-    biomarker_resi_ngl <- bm_data$biomarker_resi_ngl
-    
-    AA_expression_summary <- AA_data()$AA_expression_summary
-    
-    if (is.null(AA_expression_summary)) {
-      message("⚠️ No expression summary available for 3D visualization")
-      return()
-    }
-    
-    # Preparar datos de expresión - usar grupos dinámicos, no hardcodeados
-    expr_by_group <- AA_expression_summary %>%
-      dplyr::filter(!is_signal, !is.na(expr_mean)) %>%
-      dplyr::select(Pos, Risk2, expr_mean) %>%
-      tidyr::pivot_wider(names_from = Risk2, values_from = expr_mean)
-    
-    # Obtener nombres de grupos dinámicamente
-    group_names <- setdiff(colnames(expr_by_group), "Pos")
-    message("\n[NGL_READY] Preparing expression data for tooltips...")
-    message("[NGL_READY] Groups found: ", paste(group_names, collapse = ", "))
-    message("[NGL_READY] Positions with expression: ", nrow(expr_by_group))
-    
-    expr_data <- list()
-    for (i in 1:nrow(expr_by_group)) {
-      pos <- as.character(expr_by_group$Pos[i])
-      row_data <- as.list(expr_by_group[i, group_names, drop = FALSE])
-      names(row_data) <- group_names
-      expr_data[[pos]] <- row_data
-    }
-    
-    message("[NGL_READY] Expression data prepared for ", length(expr_data), " positions")
-    message("[NGL_READY] Example (first position):")
-    if (length(expr_data) > 0) {
-      first_pos <- names(expr_data)[1]
-      message("  Position ", first_pos, ": ", paste(names(expr_data[[first_pos]]), "=", 
-             round(unlist(expr_data[[first_pos]]), 2), collapse = ", "))
-    }
-    
-    message("\n[NGL_READY] Sending highlight_biomarkers message...")
-    message("[NGL_READY] Biomarker residues (NGL coords): ", paste(biomarker_resi_ngl, collapse = ", "))
-    message("[NGL_READY] Signal length: ", signal_length)
-    
-    # Enviar biomarcadores
-    session$sendCustomMessage(
-      type = "send_to_molstar",
-      message = list(
-        type = "highlight_biomarkers",
-        uniprot_id = input$protein_uniprot_id,
-        residues = as.list(biomarker_resi_ngl),
-        signal_length = signal_length,
-        expression_data = expr_data
-      )
-    )
-    
-    message("[NGL_READY] ✓ highlight_biomarkers message sent")
-    
-    # Marcar péptido señal
-    if (signal_length > 0) {
-      session$sendCustomMessage(
-        type = "send_to_molstar",
-        message = list(
-          type = "mark_signal",
-          signal_residues = as.list(1:signal_length)
-        )
-      )
-    }
-  }, ignoreInit = TRUE)
-  
-  # Actualizar cuando cambie la proteína
-  observeEvent(protein_trigger(), {
-    req(protein_info_data(), input$protein_uniprot_id)
-    
-    # Validar que tenemos datos antes de continuar
-    if (is.null(AA_data())) {
-      message("⚠️ Protein loaded but no expression data available for 3D update")
-      return()
-    }
-    
-    bm_data <- biomarker_data()
-    signal_length <- bm_data$signal_length
-    biomarker_resi_ngl <- bm_data$biomarker_resi_ngl
-    
-    AA_expression_summary <- AA_data()$AA_expression_summary
-    
-    if (is.null(AA_expression_summary)) {
-      message("⚠️ No expression summary available for 3D update")
-      return()
-    }
-    
-    # Preparar datos de expresión - usar grupos dinámicos
-    expr_by_group <- AA_expression_summary %>%
-      dplyr::filter(!is_signal, !is.na(expr_mean)) %>%
-      dplyr::select(Pos, Risk2, expr_mean) %>%
-      tidyr::pivot_wider(names_from = Risk2, values_from = expr_mean)
-    
-    # Obtener nombres de grupos dinámicamente
-    group_names <- setdiff(colnames(expr_by_group), "Pos")
-    
-    expr_data <- list()
-    for (i in 1:nrow(expr_by_group)) {
-      pos <- as.character(expr_by_group$Pos[i])
-      row_data <- as.list(expr_by_group[i, group_names, drop = FALSE])
-      names(row_data) <- group_names
-      expr_data[[pos]] <- row_data
-    }
-    
-    # Cargar nueva estructura
-    session$sendCustomMessage(
-      type = "send_to_molstar",
-      message = list(
-        type = "load_structure",
-        uniprot_id = input$protein_uniprot_id
-      )
-    )
-    
-    # Enviar biomarcadores
-    session$sendCustomMessage(
-      type = "send_to_molstar",
-      message = list(
-        type = "highlight_biomarkers",
-        uniprot_id = input$protein_uniprot_id,
-        residues = as.list(biomarker_resi_ngl),
-        signal_length = signal_length,
-        expression_data = expr_data
-      )
-    )
-    
-    # Marcar péptido señal
-    if (signal_length > 0) {
-      session$sendCustomMessage(
-        type = "send_to_molstar",
-        message = list(
-          type = "mark_signal",
-          signal_residues = as.list(1:signal_length)
-        )
-      )
-    }
-  }, ignoreInit = TRUE)
-  
-  # Conectar hover de ggiraph con NGL
-  observeEvent(input$snake_hovered, {
-    hovered_id <- input$snake_hovered
-    
-    if (!is.null(hovered_id) && hovered_id != "") {
-      if (grepl("^\\d+$", hovered_id)) {
-        pos <- as.integer(hovered_id)
-        
-        session$sendCustomMessage(
-          type = "send_to_molstar",
-          message = list(
-            type = "hover_residue",
-            pos = pos
-          )
-        )
-      }
-    } else {
-      session$sendCustomMessage(
-        type = "send_to_molstar",
-        message = list(type = "hover_residue", pos = NULL)
-      )
-    }
-  }, ignoreInit = TRUE, ignoreNULL = FALSE)
-  
-  # Switch de modo de color
-  observeEvent(input$protein_color_mode, {
-    message("\n[COLOR_MODE] Observer triggered: ", input$protein_color_mode)
-    
-    # Process IgE color mode
-    if (!is.null(expression_data_ige()) && !is.null(AA_data_ige())) {
-      message("[COLOR_MODE] Processing IgE...")
-      
-      if (input$protein_color_mode == "expression") {
-        AA_summary_ige <- AA_data_ige()$AA_expression_summary
-        first_group <- unique(AA_summary_ige$Risk2)[1]
-        
-        expr_by_pos <- AA_summary_ige %>%
-          dplyr::filter(Risk2 == first_group, !is_signal, !is.na(expr_mean)) %>%
-          dplyr::select(Pos, expr_mean) %>%
-          dplyr::distinct()
-        
-        expr_list <- setNames(expr_by_pos$expr_mean, as.character(expr_by_pos$Pos))
-        min_expr <- min(expr_by_pos$expr_mean, na.rm = TRUE)
-        max_expr <- max(expr_by_pos$expr_mean, na.rm = TRUE)
-        
-        session$sendCustomMessage(
-          type = "send_to_molstar",
-          message = list(
-            type = "color_by_expression",
-            target = "ige",  # Target IgE viewer only
-            data = as.list(expr_list),
-            min = min_expr,
-            max = max_expr,
-            colorScale = "green"  # GREEN for IgE
-          )
-        )
-        message("[COLOR_MODE] ✓ IgE expression mode sent (green scale)")
-      } else if (input$protein_color_mode == "polarity") {
-        session$sendCustomMessage(
-          type = "send_to_molstar",
-          message = list(type = "color_by_polarity")
-        )
-      } else {
-        # Biomarkers mode for IgE
-        bm_ige <- expression_data_ige()$biomarkers_tbl
-        if (nrow(bm_ige) > 0) {
-          Structure_info <- protein_info_data()$Structure_info
-          biomarker_nums <- bm_ige$Number
-          biomarker_resi_ngl <- sort(unique(Structure_info$Pos[Structure_info$Number %in% biomarker_nums]))
-          
-          session$sendCustomMessage(
-            type = "send_to_molstar",
-            message = list(
-              type = "highlight_biomarkers",
-              target = "ige",  # Target IgE viewer only
-              residues = as.list(biomarker_resi_ngl)
-            )
-          )
-          message("[COLOR_MODE] ✓ IgE biomarkers sent: ", length(biomarker_resi_ngl), " residues")
-        }
-      }
-    }
-    
-    # Process IgG4 color mode
-    if (!is.null(expression_data_igg4()) && !is.null(AA_data_igg4())) {
-      message("[COLOR_MODE] Processing IgG4...")
-      
-      if (input$protein_color_mode == "expression") {
-        AA_summary_igg4 <- AA_data_igg4()$AA_expression_summary
-        first_group <- unique(AA_summary_igg4$Risk2)[1]
-        
-        expr_by_pos <- AA_summary_igg4 %>%
-          dplyr::filter(Risk2 == first_group, !is_signal, !is.na(expr_mean)) %>%
-          dplyr::select(Pos, expr_mean) %>%
-          dplyr::distinct()
-        
-        expr_list <- setNames(expr_by_pos$expr_mean, as.character(expr_by_pos$Pos))
-        min_expr <- min(expr_by_pos$expr_mean, na.rm = TRUE)
-        max_expr <- max(expr_by_pos$expr_mean, na.rm = TRUE)
-        
-        session$sendCustomMessage(
-          type = "send_to_molstar",
-          message = list(
-            type = "color_by_expression",
-            target = "igg4",  # Target IgG4 viewer only
-            data = as.list(expr_list),
-            min = min_expr,
-            max = max_expr,
-            colorScale = "red"  # RED for IgG4
-          )
-        )
-        message("[COLOR_MODE] ✓ IgG4 expression mode sent (red scale)")
-      } else if (input$protein_color_mode == "polarity") {
-        session$sendCustomMessage(
-          type = "send_to_molstar",
-          message = list(type = "color_by_polarity")
-        )
-      } else {
-        # Biomarkers mode for IgG4
-        bm_igg4 <- expression_data_igg4()$biomarkers_tbl
-        if (nrow(bm_igg4) > 0) {
-          Structure_info <- protein_info_data()$Structure_info
-          biomarker_nums <- bm_igg4$Number
-          biomarker_resi_ngl <- sort(unique(Structure_info$Pos[Structure_info$Number %in% biomarker_nums]))
-          
-          session$sendCustomMessage(
-            type = "send_to_molstar",
-            message = list(
-              type = "highlight_biomarkers",
-              target = "igg4",  # Target IgG4 viewer only
-              residues = as.list(biomarker_resi_ngl)
-            )
-          )
-          message("[COLOR_MODE] ✓ IgG4 biomarkers sent: ", length(biomarker_resi_ngl), " residues")
-        }
-      }
-    }
+  output$protein_group_ui <- renderUI({
+    g <- protein_groups()
+    radioButtons("protein_group", "Group", choices = g, selected = g[1])
   })
-  
-  # Toggle de superficie
-  observeEvent(input$protein_show_surface, {
-    message("\n[SURFACE_TOGGLE] Observer triggered: ", input$protein_show_surface)
-    message("[SURFACE_TOGGLE] Sending message to NGL viewer...")
-    
-    session$sendCustomMessage(
-      type = "send_to_molstar",
-      message = list(
-        type = "toggle_surface",
-        show = input$protein_show_surface
+
+  # Per-(isotype, group, position) dataset, reusing the snake summaries
+  protein_dataset <- reactive({
+    req(AA_data_ige(), AA_data_igg4())
+    to_rows <- function(d, iso) {
+      s <- d$AA_expression_summary
+      data.frame(
+        pos = s$Pos, aa = s$AA_Pep, isotype = iso, group = s$group,
+        expr = replace(s$expr_mean, is.nan(s$expr_mean), NA_real_),
+        is_biomarker = na_false(s$is_biomarker), padj = NA_real_,
+        is_signal = na_false(s$is_signal), mod = s$mod, peptide = NA_integer_,
+        stringsAsFactors = FALSE
       )
-    )
-    
-    message("[SURFACE_TOGGLE] ✓ Message sent")
+    }
+    rbind(to_rows(AA_data_ige(), "IgE"), to_rows(AA_data_igg4(), "IgG4"))
   })
+
+  view <- function() list(
+    isotype = isolate(input$protein_isotype) %||% "IgE",
+    group   = isolate(input$protein_group) %||% protein_groups()[1],
+    mode    = isolate(input$protein_color_mode) %||% "expr",
+    fdr     = isolate(input$protein_fdr) %||% 0.05,
+    surface = isTRUE(isolate(input$protein_show_surface)),
+    biomarkers = isTRUE(isolate(input$protein_biomarkers) %||% TRUE)
+  )
+
+  send_all <- function() {
+    info <- isolate(protein_info_data())
+    session$sendCustomMessage("loadProtein", list(
+      uniprot = isolate(input$protein_uniprot_id), chain = "A",
+      signalLength = info$signal_length, disulfides = info$disulfides %||% list(),
+      isotypes = list("IgE", "IgG4"), groups = as.list(protein_groups()),
+      data = rows_list(protein_dataset()), view = view()
+    ))
+  }
+  push_view <- function() session$sendCustomMessage("setView", view())
+
+  observeEvent(protein_dataset(), send_all())
+  observeEvent(input$protein_isotype, push_view(), ignoreInit = TRUE)
+  observeEvent(input$protein_group, push_view(), ignoreInit = TRUE)
+  observeEvent(input$protein_color_mode, push_view(), ignoreInit = TRUE)
+  observeEvent(input$protein_fdr, push_view(), ignoreInit = TRUE)
+  observeEvent(input$protein_show_surface, push_view(), ignoreInit = TRUE)
+  observeEvent(input$protein_biomarkers, push_view(), ignoreInit = TRUE)
+
+  output$protein_export <- downloadHandler(
+    filename = function() paste0("biomarkers_", isolate(input$protein_isotype) %||% "IgE", ".fasta"),
+    content = function(file) {
+      df <- protein_dataset(); v <- view()
+      bm <- df[df$isotype == v$isotype & df$group == v$group & df$is_biomarker & !df$is_signal, ]
+      bm <- bm[order(bm$pos), ]
+      if (nrow(bm) == 0) { writeLines("; no biomarkers selected", file); return() }
+      brk <- c(0, cumsum(diff(bm$pos) != 1))               # contiguous stretches
+      lines <- unlist(lapply(split(bm, brk), function(r) c(
+        sprintf(">%s_%d-%d isotype=%s", isolate(input$protein_uniprot_id), min(r$pos), max(r$pos), v$isotype),
+        paste(r$aa, collapse = ""))))
+      writeLines(lines, file)
+    }
+  )
 }

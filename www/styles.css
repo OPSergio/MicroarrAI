@@ -402,6 +402,48 @@ p, ul {
   padding: 20px;
 }
 
+/* Native Shiny inputs placed inside the floating sidebar (e.g. Protein Viz):
+   inherit the sidebar typography and stay readable in dark mode. */
+.ml-sidebar .control-label,
+.ml-sidebar label,
+.ml-sidebar .radio label,
+.ml-sidebar .checkbox label,
+.ml-sidebar .shiny-input-container,
+.ml-sidebar .irs-min,
+.ml-sidebar .irs-max,
+.ml-sidebar .irs-grid-text,
+.ml-sidebar .irs-single,
+.ml-sidebar small,
+.ml-sidebar p, .ml-sidebar li, .ml-sidebar strong {
+  color: #eef1f8;
+  font-family: inherit;
+}
+.ml-sidebar .form-control,
+.ml-sidebar .selectize-input {
+  background: rgba(255, 255, 255, 0.06);
+  color: #eef1f8;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-family: inherit;
+}
+.ml-sidebar .selectize-dropdown { color: #1f2a44; }
+
+/* light mode flips */
+body.metis-light .ml-sidebar .control-label,
+body.metis-light .ml-sidebar label,
+body.metis-light .ml-sidebar .radio label,
+body.metis-light .ml-sidebar .checkbox label,
+body.metis-light .ml-sidebar .irs-min,
+body.metis-light .ml-sidebar .irs-max,
+body.metis-light .ml-sidebar .irs-grid-text,
+body.metis-light .ml-sidebar small,
+body.metis-light .ml-sidebar p,
+body.metis-light .ml-sidebar li,
+body.metis-light .ml-sidebar strong { color: #1f2a44; }
+body.metis-light .ml-sidebar .form-control,
+body.metis-light .ml-sidebar .selectize-input {
+  background: #fff; color: #1f2a44; border-color: rgba(31, 42, 68, 0.18);
+}
+
 .ml-content.sidebar-open {
   margin-left: 320px;
 }
@@ -479,7 +521,6 @@ ul#main_tabs.nav-tabs { display: none !important; }
   cursor: pointer;
   text-decoration: none;
 }
-.metis-mark { width: 28px; height: 28px; }
 .metis-wordmark {
   font-family: 'Cinzel', Georgia, serif;
   font-weight: 500;
@@ -554,6 +595,25 @@ ul#main_tabs.nav-tabs { display: none !important; }
   transition: background .2s ease, color .2s ease, border-color .2s ease;
 }
 .metis-toggle:hover { background: rgba(255, 255, 255, 0.08); color: #eef1f8; }
+
+/* Reset pipeline button — fixed top-right, above everything */
+#metis-reset-btn {
+  position: fixed;
+  top: 16px; right: 18px;
+  z-index: 2000;
+  pointer-events: auto;   /* parent .metis-nav is pointer-events:none */
+  display: grid; place-items: center;
+  width: 38px; height: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(20, 23, 46, 0.85);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  color: #eef1f8; font-size: 18px; line-height: 1; cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  transition: background .2s ease, transform .2s ease;
+}
+#metis-reset-btn:hover { background: rgba(231, 76, 60, 0.85); transform: rotate(-45deg); }
+body.metis-light #metis-reset-btn { background: #fff; color: #1f2a44; border-color: rgba(31,42,68,0.18); }
 
 /* light variant: navbar adapts (the landing iframe is themed via postMessage) */
 body.metis-light .metis-nav__pill {

@@ -53,11 +53,14 @@ calculate_peptide_summary <- function(peptide_data, expression_threshold = 3) {
   
   isotype_summary <- tibble(
     Isotype = c("IgE", "IgG4", "Other"),
+    n_samples = nrow(numeric_data),
     n_peptides = c(
       sum(ige_cols),
       sum(igg4_cols),
       sum(other_cols)
     ),
+    # NOTE: this counts positive (sample x peptide) observations, NOT peptide
+    # features. Total possible observations per isotype = n_peptides * n_samples.
     n_positive_peptides = c(
       sum(as.matrix(numeric_data[, ige_cols]) > expression_threshold, na.rm = TRUE),
       sum(as.matrix(numeric_data[, igg4_cols]) > expression_threshold, na.rm = TRUE),
@@ -101,6 +104,9 @@ create_isotype_donut_chart <- function(isotype_summary,
   # Calculate percentages and coordinates for donut chart
   isotype_summary <- isotype_summary %>%
     dplyr::mutate(
+      # Total possible measurements for this isotype (peptide features x samples)
+      n_observations = n_peptides * n_samples,
+      # Share of positive calls across isotypes (drives the donut wedge sizes)
       positive_percentage = round(n_positive_peptides / sum(n_positive_peptides) * 100, 1),
       fraction = n_positive_peptides / sum(n_positive_peptides),
       ymax = cumsum(fraction),
@@ -109,9 +115,9 @@ create_isotype_donut_chart <- function(isotype_summary,
       label = paste0(positive_percentage, "%"),
       tooltip = paste0(
         "<b>", Isotype, "</b><br/>",
-        "Positive Peptides: ", n_positive_peptides, "<br/>",
-        "Total Peptides: ", n_peptides, "<br/>",
-        "% Positive: ", round(n_positive_peptides / n_peptides * 100, 1), "%<br/>",
+        "Positive calls: ", n_positive_peptides, "<br/>",
+        "Peptides: ", n_peptides, " x ", n_samples, " samples = ", n_observations, "<br/>",
+        "% Positive: ", round(n_positive_peptides / n_observations * 100, 1), "%<br/>",
         "Mean Expr: ", round(mean_expression, 2)
       ),
       data_id = Isotype
@@ -135,11 +141,15 @@ create_isotype_donut_chart <- function(isotype_summary,
 
 
 #' Create Summary Value Boxes (KPI Cards)
-create_summary_value_boxes <- function(summary_stats) {
-  
+#'
+#' @param summary_stats List from calculate_peptide_summary().
+#' @param na_stats Optional list from compute_na_stats() on the pre-imputation
+#'   matrix. When provided, a "Peptides with NA" KPI is appended.
+create_summary_value_boxes <- function(summary_stats, na_stats = NULL) {
+
   global <- summary_stats$global
   per_sample <- summary_stats$per_sample
-  
+
   # Create KPI tibble
   kpi_data <- tibble(
     Metric = c(
@@ -160,7 +170,20 @@ create_summary_value_boxes <- function(summary_stats) {
     ),
     Icon = c("fa-users", "fa-dna", "fa-chart-line", "fa-chart-area", "fa-plus-circle", "fa-arrows-alt-h")
   )
-  
+
+  # Append missing-value KPI (counts refer to the matrix BEFORE imputation)
+  if (!is.null(na_stats)) {
+    kpi_data <- dplyr::bind_rows(
+      kpi_data,
+      tibble(
+        Metric = "Peptides with NA",
+        Value = paste0(na_stats$n_peptides_with_na,
+                       " (", round(na_stats$pct_na, 1), "% cells)"),
+        Icon = "fa-exclamation-triangle"
+      )
+    )
+  }
+
   return(kpi_data)
 }
 

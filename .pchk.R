@@ -1,0 +1,6 @@
+setwd("E:/git/MicroarrAI")
+for (f in c("app.R","R/server/ml_supervised.R")) cat(sprintf("%-26s %s\n", f, tryCatch({parse(f);"OK"}, error=function(e)conditionMessage(e))))
+suppressMessages({library(caret)})
+source("R/server/ml_supervised.R", encoding="UTF-8")
+m <- xgbtree_method_fixed()
+cat("loop is NULL:", is.null(m$loop), " predict kept:", is.function(m$predict), " label:", m$label, "\n")

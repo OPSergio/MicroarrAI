@@ -14,7 +14,7 @@ ui <- fluidPage(
   # ===== Head: Metadata & External Resources =====
   tags$head(
     tags$title("METIS"),
-    tags$link(rel = "icon", type = "image/svg+xml", href = "landing/assets/metis-mark.svg"),
+    #tags$link(rel = "icon", type = "image/svg+xml", href = "landing/assets/metis-mark.svg"),
     tags$link(rel = "preconnect", href = "https://fonts.googleapis.com"),
     tags$link(rel = "preconnect", href = "https://fonts.gstatic.com", crossorigin = NA),
     tags$link(
@@ -72,10 +72,18 @@ server <- function(input, output, session){
     parseDirPath(volumes, input$directory)
   })
   
+  # Reset the whole pipeline from scratch (fresh session clears every reactiveVal
+  # and cached result) so the user never has to reload the browser manually.
+  observeEvent(input$metis_reset, { session$reload() })
+
   raw_data <- reactiveVal(NULL)
   processed_data <- reactiveVal(NULL)
   database <- reactiveVal(NULL)
   database_edited <- reactiveVal(NULL)
+  # Bumped to force the editable metadata table to re-render (load / replace /
+  # revert / id-rename). Cell edits sync silently WITHOUT bumping this, so the
+  # table never re-renders mid-edit (no cursor jumps, no reactive loop).
+  metadata_render_trigger <- reactiveVal(0)
   pepdata <- reactiveVal(NULL)
   available_analytes <- reactiveVal(NULL)
   
@@ -528,25 +536,14 @@ output$normalization_method_description <- renderUI({
         return()
       }
       
-      # Apply inter-sample normalization if enabled
+      # Apply inter-sample (between-array) normalization if enabled.
+      # Methods live in R/server/normalization.R and operate per-sample.
       if (input$enable_inter_norm) {
-        if (input$inter_norm_method == "robust") {
-          data <- data %>%
-            mutate(across(where(is.numeric), ~scale(.x, center = TRUE, scale = TRUE)))
-        } else if (input$inter_norm_method == "center") {
-          data <- data %>%
-            mutate(across(where(is.numeric), ~(.x - mean(.x, na.rm = TRUE))))
-        } else if (input$inter_norm_method == "quantile") {
-          showNotification("Warning: Quantile normalization may alter distributions", type = "warning", duration = 5)
-          # Apply quantile normalization (requires preprocessCore)
-          if (requireNamespace("preprocessCore", quietly = TRUE)) {
-            mat <- as.matrix(data %>% select(where(is.numeric)))
-            mat_norm <- preprocessCore::normalize.quantiles(mat)
-            colnames(mat_norm) <- colnames(mat)
-            rownames(mat_norm) <- rownames(mat)
-            data[, colnames(mat_norm)] <- mat_norm
-          }
+        if (input$inter_norm_method == "quantile") {
+          showNotification("Quantile normalization harmonizes per-sample distributions.",
+                           type = "warning", duration = 5)
         }
+        data <- apply_inter_sample_normalization(data, method = input$inter_norm_method)
       }
       
       processed_data(data)
@@ -621,17 +618,16 @@ output$normalization_method_description <- renderUI({
       df[[id_col]] <- gsub("\\.(csv|txt|xlsx|xls)$", "", df[[id_col]], ignore.case = TRUE)
       
       # Update column selectors
-      updateSelectInput(session, "sample_id_col", choices = colnames(df), 
+      updateSelectInput(session, "sample_id_col", choices = colnames(df),
                        selected = if("id" %in% colnames(df)) "id" else colnames(df)[1])
-      updateSelectInput(session, "target_col", choices = colnames(df), 
-                       selected = if("Target" %in% colnames(df)) "Target" else colnames(df)[ncol(df)])
-      updateSelectInput(session, "replace_column", choices = colnames(df), 
+      updateSelectInput(session, "replace_column", choices = colnames(df),
                        selected = colnames(df)[1])
-      
+
       # Store original database
       database(df)
       database_edited(df)
-      
+      metadata_render_trigger(metadata_render_trigger() + 1)
+
       showNotification(
         paste("Metadata loaded:", nrow(df), "samples,", ncol(df), "columns"),
         type = "message",
@@ -643,57 +639,75 @@ output$normalization_method_description <- renderUI({
   })
   
   # ===== Rename sample ID column to 'id' when user confirms selection =====
+  # Operates on the EDITED metadata so manual edits / find-replace are preserved.
   observeEvent(input$sample_id_col, {
-    req(database())
-    req(input$sample_id_col)
-    
-    df <- database()
-    
-    # Rename selected column to 'id' for consistent joins
-    if (input$sample_id_col %in% colnames(df) && input$sample_id_col != "id") {
-      df <- df %>%
-        dplyr::rename(id = !!rlang::sym(input$sample_id_col))
-      
-      database_edited(df)
-      
-      showNotification(
-        paste("Sample ID column '", input$sample_id_col, "' renamed to 'id' for analysis"),
-        type = "message",
-        duration = 3
-      )
-    } else if (input$sample_id_col == "id") {
-      # Already named 'id', just update database_edited
-      database_edited(df)
-    }
-  })
-  
-  # ===== Metadata Preview Table =====
-  output$metadata_table <- rhandsontable::renderRHandsontable({
     req(database_edited())
-    rhandsontable::rhandsontable(database_edited(), height = 300, stretchH = "all") %>%
+    req(input$sample_id_col)
+
+    df <- database_edited()
+    sel <- input$sample_id_col
+
+    if (!sel %in% colnames(df) || sel == "id") {
+      return()  # nothing to rename
+    }
+
+    # Drop any pre-existing 'id' column so the rename never collides
+    if ("id" %in% colnames(df)) df[["id"]] <- NULL
+    df <- df %>% dplyr::rename(id = !!rlang::sym(sel))
+
+    database_edited(df)
+    metadata_render_trigger(metadata_render_trigger() + 1)
+
+    showNotification(
+      paste0("Sample ID column '", sel, "' renamed to 'id' for analysis"),
+      type = "message",
+      duration = 3
+    )
+  })
+
+  # ===== Metadata Preview Table =====
+  # Re-renders only on explicit triggers (load / replace / revert / rename), NOT
+  # on every cell edit -> avoids cursor jumps and reactive loops.
+  output$metadata_table <- rhandsontable::renderRHandsontable({
+    metadata_render_trigger()
+    df <- isolate(database_edited())
+    req(df)
+    rhandsontable::rhandsontable(df, height = 300, stretchH = "all") %>%
       rhandsontable::hot_context_menu(allowRowEdit = FALSE, allowColEdit = FALSE)
   })
-  
+
+  # ===== Auto-sync manual cell edits into database_edited =====
+  # Keeps the edited data current so Find & Replace and downstream joins always
+  # see the latest cell edits without needing an explicit "Apply" click.
+  observeEvent(input$metadata_table, {
+    edited_df <- rhandsontable::hot_to_r(input$metadata_table)
+    if (!is.null(edited_df)) {
+      database_edited(edited_df)
+    }
+  }, ignoreInit = TRUE)
+
   # ===== Find & Replace in Metadata =====
   observeEvent(input$apply_find_replace, {
     req(database_edited())
     req(input$replace_column)
     req(input$find_text)
-    
+
     df <- database_edited()
     col <- input$replace_column
     find_text <- input$find_text
     replace_text <- if (is.null(input$replace_text)) "" else input$replace_text
-    
+
     if (col %in% colnames(df)) {
-      # Count matches
-      matches <- sum(grepl(find_text, df[[col]], fixed = TRUE))
-      
+      # Operate on a character copy so numeric/factor columns match as displayed
+      col_chr <- as.character(df[[col]])
+      matches <- sum(grepl(find_text, col_chr, fixed = TRUE))
+
       if (matches > 0) {
-        # Replace all occurrences
-        df[[col]] <- gsub(find_text, replace_text, df[[col]], fixed = TRUE)
+        # Replace all occurrences and force the table to refresh
+        df[[col]] <- gsub(find_text, replace_text, col_chr, fixed = TRUE)
         database_edited(df)
-        
+        metadata_render_trigger(metadata_render_trigger() + 1)
+
         showNotification(
           paste("Replaced", matches, "occurrence(s) in column:", col),
           type = "message",
@@ -701,15 +715,15 @@ output$normalization_method_description <- renderUI({
         )
       } else {
         showNotification(
-          paste("No matches found for '", find_text, "' in column:", col),
+          paste0("No matches found for '", find_text, "' in column: ", col),
           type = "warning",
           duration = 3
         )
       }
     }
   })
-  
-  # ===== Apply Metadata Edits =====
+
+  # ===== Apply Metadata Edits (explicit confirm; edits already auto-sync) =====
   observeEvent(input$apply_metadata_edits, {
     if (!is.null(input$metadata_table)) {
       edited_df <- rhandsontable::hot_to_r(input$metadata_table)
@@ -717,10 +731,11 @@ output$normalization_method_description <- renderUI({
       showNotification("Metadata changes applied", type = "message")
     }
   })
-  
+
   # ===== Revert Metadata Edits =====
   observeEvent(input$revert_metadata_edits, {
     database_edited(database())
+    metadata_render_trigger(metadata_render_trigger() + 1)
     showNotification("Metadata reverted to original", type = "message")
   })
   
@@ -853,10 +868,10 @@ output$normalization_method_description <- renderUI({
     if (nrow(example_db) > 0) {
       database(example_db)
       database_edited(example_db)
-      
+      metadata_render_trigger(metadata_render_trigger() + 1)
+
       # Update column selectors
       updateSelectInput(session, "sample_id_col", choices = colnames(example_db), selected = "id")
-      updateSelectInput(session, "target_col", choices = colnames(example_db), selected = "Target")
       updateSelectInput(session, "replace_column", choices = colnames(example_db), selected = "Target")
     } else {
       stop("Error: No se pudo generar la base de datos de ejemplo.")
@@ -927,13 +942,13 @@ output$normalization_method_description <- renderUI({
   })
   
   ## Peptide tab - Updated to use processed_data from both RAW and processed modes
-  pepdata <- reactive({
+  # Raw analysis matrix BEFORE imputation (still contains NAs from flagged spots).
+  # Kept separate so the Data Overview can report missingness honestly.
+  raw_pepdata <- reactive({
     # Check if we have processed data from either mode
     if (!is.null(processed_data())) {
       data <- processed_data()
-      
-
-    } 
+    }
     # Fallback: Generate synthetic example data
     else if (input$load_example_pep > 0) {
       data <- generate_synthetic_peptide_data(
@@ -948,13 +963,24 @@ output$normalization_method_description <- renderUI({
 
     # Clean column names for R compatibility
     colnames(data) <- make.names(colnames(data))
-    
-    # FINAL STEP: Replace NA with 0 (filtered spots = no reliable signal)
-    # This happens AFTER all normalization calculations
-    data <- data %>%
-      dplyr::mutate(dplyr::across(where(is.numeric), ~tidyr::replace_na(.x, 0)))
-    
-    return(data)
+    data
+  })
+
+  # Missing-value diagnostics on the raw (pre-imputation) matrix
+  na_stats <- reactive({
+    req(raw_pepdata())
+    compute_na_stats(raw_pepdata())
+  })
+
+  # Analysis matrix: missing values imputed so downstream stats/ML/viz never
+  # drop samples. Method is user-selectable (default kNN). Imputation replaces
+  # the old silent NA->0, which was a biased "equal to control" assumption.
+  pepdata <- reactive({
+    data <- raw_pepdata()
+    if (is.null(data)) return(NULL)
+
+    method <- if (!is.null(input$imputation_method)) input$imputation_method else "knn"
+    impute_missing(data, method = method)
   })
   
   output$data_status_pep <- renderText({
@@ -1100,50 +1126,15 @@ output$normalization_method_description <- renderUI({
   # KPI value boxes
   output$kpi_boxes <- renderUI({
     req(peptide_summary())
-    kpi_data <- create_summary_value_boxes(peptide_summary())
-    
-    # Icons for each KPI
-    kpi_icons <- c("users", "dna", "chart-line", "chart-area", "plus-circle", "arrows-alt-h")
-    
-    # KPI cards
+    kpi_data <- create_summary_value_boxes(peptide_summary(), na_stats())
+
+    # PowerBI-style flat tiles, 4 per row; NA tile flagged amber
     fluidRow(
-        lapply(1:nrow(kpi_data), function(i) {
-          column(
-            width = 2,
-            div(
-              style = paste0(
-                "background: white;",
-                "border-radius: 12px;",
-                "padding: 20px 15px;",
-                "margin-bottom: 15px;",
-                "min-height: 120px;",
-                "box-shadow: 0 4px 15px rgba(0,0,0,0.1);",
-                "transition: transform 0.3s ease, box-shadow 0.3s ease;",
-                "position: relative;",
-                "overflow: hidden;"
-              ),
-              # Icon background decoration
-              div(
-                style = "position: absolute; right: -10px; top: -10px; opacity: 0.03; font-size: 60px; color: #191c32;",
-                tags$i(class = paste0("fa fa-", kpi_icons[i]))
-              ),
-              # Content
-              div(
-                style = "position: relative; z-index: 2;",
-                tags$div(
-                  style = "align-items: center; margin-bottom: 10px;",
-                  icon(kpi_icons[i], style = "font-size: 18px; color: #191c32; margin-right: 8px;"),
-                  tags$span(kpi_data$Metric[i], style = "font-size: 14px; color: #191c32; font-weight: 600;")
-                ),
-                tags$div(
-                  style = "font-size: 32px; font-weight: bold; color: #191c32; margin: 5px 0;",
-                  kpi_data$Value[i]
-                )
-              )
-            )
-          )
-        })
-      )
+      lapply(1:nrow(kpi_data), function(i) {
+        accent <- if (kpi_data$Metric[i] == "Peptides with NA") "#e0a800" else "#17a589"
+        column(3, kpi_card(kpi_data$Metric[i], kpi_data$Value[i], accent))
+      })
+    )
   })
   
   # ========== Threshold Info Panel ==========
@@ -1589,7 +1580,7 @@ output$normalization_method_description <- renderUI({
           expression_data = M$Expression,
           target = M$target
         )
-        Method <- "Logistic regression (GLM)"
+        Method <- "GLM"
       }
       
       # Calculate performance metrics
@@ -1656,7 +1647,10 @@ output$normalization_method_description <- renderUI({
     db <- active_database()
     facs <- names(db)[vapply(db, function(x) is.factor(x) || is.character(x), logical(1))]
     facs <- setdiff(facs, "id")
-    selectInput("volcano_group_var", dark_label("Contrast Variable:"), choices = facs)
+    # Default to the SAME contrast the differential analysis runs with (input$stats),
+    # not just the first factor (which was landing on e.g. 'sexo').
+    sel <- if (!is.null(input$stats) && input$stats %in% facs) input$stats else facs[1]
+    selectInput("volcano_group_var", dark_label("Contrast Variable:"), choices = facs, selected = sel)
   })
   
   # Niveles A y B (contraste binario)
@@ -1734,116 +1728,77 @@ output$normalization_method_description <- renderUI({
         nB    = sum(.grp == levels(.grp)[2], na.rm = TRUE),
         meanA = mean(expr[.grp == levels(.grp)[1]], na.rm = TRUE),
         meanB = mean(expr[.grp == levels(.grp)[2]], na.rm = TRUE),
-        log2FC = log2((meanB + 1e-9) / (meanA + 1e-9)),
+        # Data is already on a log/z-score scale, so the fold change is the
+        # difference of group means (ratios/logs would produce NaN on negatives).
+        log2FC = meanB - meanA,
         p = {
-          g1 <- expr[.grp == levels(.grp)[1]]
-          g2 <- expr[.grp == levels(.grp)[2]]
-          if ((stats::sd(g1, na.rm = TRUE) == 0) && (stats::sd(g2, na.rm = TRUE) == 0)) NA_real_
-          else tryCatch(stats::t.test(g2, g1)$p.value, error = function(e) NA_real_)
+          g1 <- expr[.grp == levels(.grp)[1]]; g1 <- g1[is.finite(g1)]
+          g2 <- expr[.grp == levels(.grp)[2]]; g2 <- g2[is.finite(g2)]
+          # Pooled t-test (var.equal) matches the lm() used in the Differential
+          # Expression table, so per-peptide raw p-values agree.
+          if (length(g1) < 2 || length(g2) < 2) NA_real_
+          else tryCatch(stats::t.test(g2, g1, var.equal = TRUE)$p.value, error = function(e) NA_real_)
         },
         .groups = "drop"
       ) %>%
       dplyr::mutate(
         padj = p.adjust(p, method = "BH"),
+        neglog10_p = -log10(p),
         neglog10_padj = -log10(padj),
-        status = dplyr::case_when(
-          padj <= input$volcano_padj_thr & log2FC >=  input$volcano_lfc_thr ~ "Up",
-          padj <= input$volcano_padj_thr & log2FC <= -input$volcano_lfc_thr ~ "Down",
-          TRUE ~ "NS"
-        ),
         group_var = input$volcano_group_var,
         group_A   = input$volcano_level_a,
         group_B   = input$volcano_level_b
       ) %>%
       dplyr::arrange(padj, dplyr::desc(abs(log2FC)))
-    
+
     res
   })
-  
-  
-  # Contenedor del gráfico (plot o ggiraph)
-  output$volcano_plot_container <- renderUI({
-    if (isTRUE(input$volcano_interactive)) {
-      girafeOutput("volcano_plotly", height = "540px")
-    } else {
-      plotOutput("volcano_plot", height = "540px")
-    }
+
+  # Add status using the current thresholds. Kept separate from volcano_tbl()
+  # so moving a threshold recolours instantly without re-running the t-tests.
+  volcano_data <- reactive({
+    volcano_tbl() %>%
+      dplyr::mutate(status = dplyr::case_when(
+        padj <= input$volcano_padj_thr & log2FC >=  input$volcano_lfc_thr ~ "Up",
+        padj <= input$volcano_padj_thr & log2FC <= -input$volcano_lfc_thr ~ "Down",
+        TRUE ~ "NS"
+      ))
   })
   
-  # Volcano estático
-  output$volcano_plot <- renderPlot({
+  
+  # Volcano plot is now a native D3 module (www/volcano_d3.js). Status, the Y
+  # metric and threshold lines are recomputed client-side, so colours/labels
+  # refresh instantly when sliders or the axis change.
+  volcano_view <- function() list(
+    padjThr  = input$volcano_padj_thr,
+    lfcThr   = input$volcano_lfc_thr,
+    yaxis    = if (is.null(input$volcano_yaxis)) "padj" else input$volcano_yaxis,
+    facet    = isTRUE(input$volcano_facet_isotype),
+    isotypes = as.list(if (is.null(input$volcano_isotypes)) c("IgE", "IgG4") else input$volcano_isotypes)
+  )
+
+  observeEvent(volcano_tbl(), {
     tb <- volcano_tbl()
-    thr_y <- -log10(input$volcano_padj_thr)
-    
-    gp <- ggplot(tb, aes(x = log2FC, y = neglog10_padj, color = status, shape = isotype)) +
-      geom_hline(yintercept = thr_y, linetype = "dashed") +
-      geom_vline(xintercept = c(-input$volcano_lfc_thr, input$volcano_lfc_thr), linetype = "dashed") +
-      geom_point(alpha = 0.9, size = 2.2) +
-      scale_color_manual(values = volcano_colors) +
-      scale_shape_manual(values = c(IgE = 16, IgG4 = 17)) +
-      theme_microarrai() +
-      labs(
-        title = paste0("Volcano — ", paste(input$volcano_isotypes, collapse = " + "),
-                       "  (", input$volcano_level_a, " vs ", input$volcano_level_b, ")"),
-        x = "log2 Fold-Change (B vs A)",
-        y = expression(-log[10]("FDR (BH)")),
-        color = NULL, shape = "Isotype"
-      )
-    
-    if (isTRUE(input$volcano_facet_isotype) && length(unique(tb$isotype)) > 1) {
-      gp <- gp + facet_wrap(~isotype, nrow = 1, scales = "free_x")
-    }
-    
-    gp
+    rows <- lapply(seq_len(nrow(tb)), function(i) list(
+      peptide = tb$peptide[i], isotype = as.character(tb$isotype[i]),
+      log2FC = tb$log2FC[i], p = tb$p[i], padj = tb$padj[i],
+      neglog10_p = tb$neglog10_p[i], neglog10_padj = tb$neglog10_padj[i],
+      nA = tb$nA[i], nB = tb$nB[i]
+    ))
+    session$sendCustomMessage("volcanoData", list(rows = rows, view = volcano_view()))
   })
-  
-  # Volcano interactivo
-  output$volcano_plotly <- renderGirafe({
-    tb <- volcano_tbl()
-    thr_y <- -log10(input$volcano_padj_thr)
-    
-    # Prepare data with tooltips
-    tb <- tb %>%
-      mutate(
-        tooltip = paste0(
-          "<b>", peptide, "</b><br/>",
-          "Isotype: ", isotype, "<br/>",
-          "log2FC: ", round(log2FC, 2), "<br/>",
-          "FDR: ", round(padj, 4), "<br/>",
-          "nA: ", nA, "  nB: ", nB
-        ),
-        data_id = peptide
-      )
-    
-    gp <- ggplot(tb, aes(
-      x = log2FC, y = neglog10_padj, color = status, shape = isotype,
-      tooltip = tooltip, data_id = data_id
-    )) +
-      geom_hline(yintercept = thr_y, linetype = "dashed") +
-      geom_vline(xintercept = c(-input$volcano_lfc_thr, input$volcano_lfc_thr), linetype = "dashed") +
-      geom_point_interactive(alpha = 0.9, size = 2.2) +
-      scale_color_manual(values = volcano_colors) +
-      scale_shape_manual(values = c(IgE = 16, IgG4 = 17, Mixed = 15)) +
-      theme_microarrai() +
-      labs(
-        title = paste0("Volcano — ",
-                       if (all(tb$isotype == "Mixed")) "Mixed" else paste(unique(as.character(tb$isotype)), collapse = " + "),
-                       "  (", input$volcano_level_a, " vs ", input$volcano_level_b, ")"),
-        x = "log2 Fold-Change (B vs A)",
-        y = "-log[10](p-adjust)",
-        color = NULL, shape = "Isotype"
-      )
-    
-    if (isTRUE(input$volcano_facet_isotype) && length(unique(tb$isotype)) > 1) {
-      gp <- gp + facet_wrap(~isotype, nrow = 1, scales = "free_x")
-    }
-    
-    apply_girafe(gp, width_svg = 12, height_svg = 8)
-  })
-  
+
+  # Threshold / axis / facet / isotype changes only update the view (instant)
+  observeEvent(input$volcano_padj_thr,      session$sendCustomMessage("volcanoView", volcano_view()), ignoreInit = TRUE)
+  observeEvent(input$volcano_lfc_thr,       session$sendCustomMessage("volcanoView", volcano_view()), ignoreInit = TRUE)
+  observeEvent(input$volcano_yaxis,         session$sendCustomMessage("volcanoView", volcano_view()), ignoreInit = TRUE)
+  observeEvent(input$volcano_facet_isotype, session$sendCustomMessage("volcanoView", volcano_view()), ignoreInit = TRUE)
+  observeEvent(input$volcano_isotypes,      session$sendCustomMessage("volcanoView", volcano_view()), ignoreInit = TRUE)
+
+
   # Tabla de “hits”
   output$volcano_hits_table <- DT::renderDT({
-    tb <- volcano_tbl() %>%
+    tb <- volcano_data() %>%
       dplyr::mutate(
         meanA = round(meanA, 4),
         meanB = round(meanB, 4),
@@ -1873,7 +1828,7 @@ output$normalization_method_description <- renderUI({
       paste0("volcano_", iso, "_", input$volcano_level_a, "_vs_", input$volcano_level_b, ".csv")
     },
     content = function(file) {
-      readr::write_csv(volcano_tbl(), file)
+      readr::write_csv(volcano_data(), file)
     }
   )
   
@@ -2234,7 +2189,7 @@ output$normalization_method_description <- renderUI({
   ml_ranked_peptides <- reactive({
     req(results_filtered())
     
-    base <- results_filtered() %>% dplyr::select(peptide, p.adj, AUC)
+    base <- results_filtered() %>% dplyr::select(peptide, p.adj, AUC, dplyr::any_of("Accuracy"))
     
     base %>%
       dplyr::mutate(
@@ -2879,16 +2834,13 @@ output$normalization_method_description <- renderUI({
     n_noise <- sum(db_result$cluster == 0)
     n_samples <- nrow(pca_coords)
     
-    # Calculate silhouette score if we have clusters
+    # Silhouette needs at least 2 non-noise clusters, else silhouette() returns NA
     sil_score <- NA
-    if (n_clusters > 0 && n_clusters < n_samples - 1) {
-      # Remove noise points for silhouette calculation
-      non_noise_idx <- db_result$cluster != 0
-      if (sum(non_noise_idx) > 1) {
-        sil <- cluster::silhouette(db_result$cluster[non_noise_idx], 
-                                   dist(pca_coords[non_noise_idx, ]))
-        sil_score <- round(mean(sil[, 3]), 3)
-      }
+    non_noise_idx <- db_result$cluster != 0
+    if (length(unique(db_result$cluster[non_noise_idx])) >= 2) {
+      sil <- cluster::silhouette(db_result$cluster[non_noise_idx],
+                                 dist(pca_coords[non_noise_idx, ]))
+      if (is.matrix(sil)) sil_score <- round(mean(sil[, 3]), 3)
     }
     
     tagList(
@@ -3098,11 +3050,13 @@ output$normalization_method_description <- renderUI({
   ML.db <- reactive({
     req(meta_data_ML(), active_target_var())
     
-    # Use modular ML data preparation function
+    # Use modular ML data preparation function (clinical NAs imputed with the
+    # same method chosen for peptides, default kNN)
     result <- prepare_ml_data(
       data = meta_data_ML(),
       group_var = active_target_var(),
-      id_column = "id"
+      id_column = "id",
+      impute_method = if (!is.null(input$imputation_method)) input$imputation_method else "knn"
     )
     
     message("ML.db prepared with ", nrow(result), " samples and ", ncol(result), " features")
@@ -3960,42 +3914,28 @@ output$normalization_method_description <- renderUI({
   #### End supervised Machine ####
   
   
-  output$venn.plot <- renderPlot({
-    # Get top N from slider
-    top_n <- if(!is.null(input$consensus_top_n)) input$consensus_top_n else 20
-    
-    # Build list dynamically based on selected models, limited to top_n
-    model_vars <- list()
-    
-    if (!is.null(input$ml_use_c50) && input$ml_use_c50) {
-      all_vars <- variables_c5()
-      model_vars[["C5.0"]] <- head(all_vars, top_n)
-    }
-    
-    if (!is.null(input$ml_use_rf) && input$ml_use_rf) {
-      all_vars <- variables_rf()
-      model_vars[["Random Forest"]] <- head(all_vars, top_n)
-    }
-    
-    if (!is.null(input$ml_use_svm) && input$ml_use_svm) {
-      all_vars <- variables_importantes_reactive()
-      model_vars[["SVM"]] <- head(all_vars, top_n)
-    }
-    
-    if (!is.null(input$ml_use_xgboost) && input$ml_use_xgboost) {
-      all_vars <- variables_xgb()
-      model_vars[["XGBoost"]] <- head(all_vars, top_n)
-    }
-    
-    # Only render if at least 2 models selected
-    req(length(model_vars) >= 2)
-    
-    ggvenn(
-      model_vars,
-      fill_color = custom_palette,
-      stroke_size = 0.5, set_name_size = 4, text_size = 4
-    ) +
-      ggtitle(paste("Consensus of Top", top_n, "Variables per Model"))
+  # Feature overlap is now an interactive D3 Venn (www/venn_d3.js). Build the
+  # per-model top-N feature lists and push them to the client.
+  venn_model_vars <- reactive({
+    top_n <- if (!is.null(input$consensus_top_n)) input$consensus_top_n else 20
+    safe <- function(expr) tryCatch(expr, error = function(e) NULL)
+    mv <- list()
+    if (isTRUE(input$ml_use_c50))     mv[["C5.0"]]          <- head(safe(variables_c5()), top_n)
+    if (isTRUE(input$ml_use_rf))      mv[["Random Forest"]] <- head(safe(variables_rf()), top_n)
+    if (isTRUE(input$ml_use_svm))     mv[["SVM"]]           <- head(safe(variables_importantes_reactive()), top_n)
+    if (isTRUE(input$ml_use_xgboost)) mv[["XGBoost"]]       <- head(safe(variables_xgb()), top_n)
+    mv[vapply(mv, function(v) length(v) > 0, logical(1))]   # drop empty / untrained
+  })
+
+  observeEvent(venn_model_vars(), {
+    mv <- venn_model_vars()
+    req(length(mv) >= 2)
+    sets <- lapply(names(mv), function(nm) list(name = nm, features = as.list(as.character(mv[[nm]]))))
+    # On-brand, distinct set colours (teal, blue, orange, purple)
+    venn_cols <- c("#18BC9C", "#1F78B4", "#FF7F00", "#6A3D9A")
+    session$sendCustomMessage("vennData", list(
+      sets = sets, colors = as.list(venn_cols[seq_along(sets)])
+    ))
   })
   
   output$consensus_vars <- renderText({
@@ -4058,14 +3998,16 @@ output$normalization_method_description <- renderUI({
     
     req(length(model_vars) >= 2)
     
-    # Find features in multiple models
-    all_features <- unique(unlist(model_vars))
+    # Find features in 2+ models (coerce to character; some models may return none)
+    all_features <- unique(as.character(unlist(model_vars, use.names = FALSE)))
+    all_features <- all_features[!is.na(all_features) & nzchar(all_features)]
+    req(length(all_features) > 0)
     feature_counts <- sapply(all_features, function(feat) {
-      sum(sapply(model_vars, function(vars) feat %in% vars))
+      sum(sapply(model_vars, function(vars) feat %in% as.character(vars)))
     })
-    
-    # Get consensus features (in 2+ models)
-    consensus_features <- names(feature_counts[feature_counts >= 2])
+
+    # Get consensus features (in 2+ models), most frequent first
+    consensus_features <- names(which(feature_counts >= 2))
     consensus_features <- consensus_features[order(-feature_counts[consensus_features])]
     
     if (length(consensus_features) > 0) {
@@ -4240,15 +4182,19 @@ output$normalization_method_description <- renderUI({
     req(database())
     req(active_pepdata())
     
-    choices <- colnames(meta_data_ML() %>% 
-                         dplyr::select((ncol(active_pepdata()) + 1):ncol(meta_data_ML())) %>% 
+    choices <- colnames(meta_data_ML() %>%
+                         dplyr::select((ncol(active_pepdata()) + 1):ncol(meta_data_ML())) %>%
                          as.data.frame())
-    
+
+    # Preserve the user's current choice across re-renders (e.g. after running ML
+    # meta_data_ML changes and this UI rebuilds). isolate() avoids re-rendering on
+    # every target change while keeping the selection sticky.
+    cur <- isolate(input$ml_target_var)
     selectInput(
-      "ml_target_var", 
+      "ml_target_var",
       label = NULL,
       choices = choices,
-      selected = choices[1],
+      selected = if (!is.null(cur) && cur %in% choices) cur else choices[1],
       width = "100%"
     )
   })
@@ -4256,9 +4202,13 @@ output$normalization_method_description <- renderUI({
   # Run ML Pipeline
   observeEvent(input$ml_run_pipeline, {
     req(input$ml_target_var)
-    
+
+    # Debounce: block re-runs for 10s so rapid clicks don't queue the pipeline
+    shinyjs::disable("ml_run_pipeline")
+    shinyjs::delay(10000, shinyjs::enable("ml_run_pipeline"))
+
     # Validate at least one method selected
-    any_unsupervised <- input$ml_use_heatmap || input$ml_use_pca || 
+    any_unsupervised <- input$ml_use_heatmap || input$ml_use_pca ||
                         input$ml_use_pcoa || input$ml_use_nmds || 
                         input$ml_use_dbscan || input$ml_use_plsda
     
@@ -4290,9 +4240,11 @@ output$normalization_method_description <- renderUI({
       )
     }
     
+    shinyjs::show("ml_loader")
+
     # Run with progress bar
     withProgress(message = 'Running ML Pipeline...', value = 0, {
-      
+
       # Step 1: Show/hide heatmap
       incProgress(0.1, detail = "Configuring heatmap...")
       if (input$ml_use_heatmap) {
@@ -4388,14 +4340,18 @@ output$normalization_method_description <- renderUI({
       
       # Step 5: Complete
       incProgress(1, detail = "Pipeline configured successfully!")
-      Sys.sleep(0.5)  # Brief pause to show completion
     })
-    
-    showNotification(
-      "ML pipeline ready! Results will appear as they are computed.",
-      type = "message",
-      duration = 4
-    )
+
+    # Force training in a deferred callback so the spinner actually renders first
+    # (show + heavy work in the same synchronous observer would never paint).
+    shinyjs::delay(250, {
+      if (isTRUE(input$ml_use_c50))     try(c50_advanced_result(), silent = TRUE)
+      if (isTRUE(input$ml_use_rf))      try(rf_advanced_result(), silent = TRUE)
+      if (isTRUE(input$ml_use_svm))     try(svm_advanced_result(), silent = TRUE)
+      if (isTRUE(input$ml_use_xgboost)) try(xgboost_advanced_result(), silent = TRUE)
+      shinyjs::hide("ml_loader")
+      showNotification("ML pipeline ready! Results are shown below.", type = "message", duration = 4)
+    })
   })
   
   # ============================================================================

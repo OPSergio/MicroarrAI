@@ -415,8 +415,7 @@ ui_preprocess <- function() {
                 selectInput(
                   "normalization_method",
                   dark_label("Method:"),
-                  choices = c("Z-score (recommended)" = "Z-score", 
-                             "Median Scaling" = "Median Scaling"),
+                  choices = c("Z-score (robust, control-based)" = "Z-score"),
                   selected = "Z-score"
                 ),
                 tags$div(
@@ -433,22 +432,46 @@ ui_preprocess <- function() {
                   selectInput(
                     "inter_norm_method",
                     dark_label("Method:"),
-                    choices = c("Robust Scaling (recommended)" = "robust", 
-                               "Centering" = "center",
-                               "Quantile (use with caution)" = "quantile"),
+                    choices = c("Robust per-sample (median / MAD)" = "robust",
+                               "Quantile (Bolstad)" = "quantile"),
                     selected = "robust"
                   ),
                   tags$div(
                     style = "background: #fff3cd; padding: 10px; border-radius: 4px; border-left: 3px solid #ffc107; margin-top: 10px;",
-                    tags$small(icon("exclamation-triangle"), " Quantile normalization may alter biological signal distributions",
+                    tags$small(icon("exclamation-triangle"), " Quantile normalization forces all samples to share the same distribution; use when arrays are technically comparable.",
                               style = "color: #856404;")
                   )
                 )
               )
             ),
-            
+
             tags$hr(style = "margin: 25px 0;"),
-            
+
+            fluidRow(
+              column(
+                6,
+                tags$h5(icon("fill-drip"), " Missing-value Imputation", style = "color: #191c32; margin-bottom: 15px;"),
+                selectInput(
+                  "imputation_method",
+                  dark_label("Method:"),
+                  choices = c("k-Nearest Neighbours (recommended)" = "knn",
+                              "Random Forest (missForest)" = "rf",
+                              "Per-peptide median" = "median"),
+                  selected = "knn"
+                ),
+                tags$div(
+                  style = "background: #e8f4f8; padding: 12px; border-radius: 4px; margin-top: 10px;",
+                  tags$small(
+                    icon("info-circle"),
+                    " Spots removed by quality flags are missing, not zero. They are imputed from similar peptides so no sample is dropped during ML. RF is slower on large matrices.",
+                    style = "color: #191c32;"
+                  )
+                )
+              )
+            ),
+
+            tags$hr(style = "margin: 25px 0;"),
+
             fluidRow(
               column(
                 12,
@@ -573,15 +596,14 @@ ui_preprocess <- function() {
             fluidRow(
               column(
                 6,
-                selectInput("sample_id_col", 
-                           dark_label("Sample ID Column:"), 
-                           choices = NULL)
-              ),
-              column(
-                6,
-                selectInput("target_col", 
-                           dark_label("Target Variable Column:"), 
-                           choices = NULL)
+                selectInput("sample_id_col",
+                           dark_label("Sample ID Column:"),
+                           choices = NULL),
+                tags$small(
+                  icon("info-circle"),
+                  " This column is renamed to 'id' and used to join metadata with the expression matrix.",
+                  style = "color: #6c757d;"
+                )
               )
             ),
             

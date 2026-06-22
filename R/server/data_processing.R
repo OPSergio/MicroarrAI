@@ -2,7 +2,7 @@
 # MicroarrAI - Data Processing Functions
 # ============================================================================
 # Description: Pure functions for microarray data loading and normalization
-# Dependencies: tidyverse, preprocessCore
+# Dependencies: tidyverse (normalization maths live in R/server/normalization.R)
 # Documentation: docs/data_processing.md
 # ============================================================================
 
@@ -12,12 +12,28 @@
 #'
 #' @param file_path Character. Full path to CSV file
 #' @return Integer. Row number where header starts (0-indexed for skip parameter)
-#' @details Searches for the row containing "Block" column header
+#' @details
+#' Locates the column-header row by finding the first line whose
+#' comma-separated fields contain an exact "ID" column. This works for both
+#' GenePix (.gpr-style) exports and PerkinElmer ScanArray Express CSV files,
+#' which place the column header right after a "BEGIN DATA" marker.
 detect_genepix_header <- function(file_path) {
-  lines <- readLines(file_path, n = 100, warn = FALSE)
-  header_row <- which(grepl("Block", lines, ignore.case = TRUE))[1]
+  lines <- readLines(file_path, n = 200, warn = FALSE, encoding = "latin1")
+
+  # Find the row whose fields include an exact "ID" column header
+  has_id_col <- vapply(lines, function(line) {
+    fields <- trimws(strsplit(line, ",", fixed = TRUE)[[1]])
+    "ID" %in% fields
+  }, logical(1))
+  header_row <- which(has_id_col)[1]
+
   if (is.na(header_row)) {
-    warning("Could not detect GenePix header. Using default skip=60")
+    # Fallback: GenePix files use a "Block" column header
+    header_row <- which(grepl("Block", lines, ignore.case = TRUE))[1]
+  }
+
+  if (is.na(header_row)) {
+    warning("Could not detect microarray header. Using default skip=60")
     return(60)
   }
   return(header_row - 1)  # Return skip value
@@ -72,9 +88,9 @@ clean_analyte_ids <- function(ids) {
 #' - Calculates Expression_Ch2 = log2(Ch2.Median / Ch2.B.Median)
 #' @examples
 #' df <- read_microarray_file("sample001.csv")
-read_microarray_file <- function(file_path, 
-                                 flag_threshold = 4, 
-                                 auto_detect_header = FALSE,
+read_microarray_file <- function(file_path,
+                                 flag_threshold = 4,
+                                 auto_detect_header = TRUE,
                                  skip_rows = 60) {
   
   # Detect header if requested
@@ -104,126 +120,25 @@ read_microarray_file <- function(file_path,
 }
 
 
-#' Normalize Single Expression Vector
-#' 
-#' Applies normalization to a single expression vector (channel-independent)
+#' Normalize Single Expression Vector (intra-sample)
 #'
-#' @param expression Numeric vector. Expression values
-#' @param ids Character vector. Analyte IDs matching expression vector
-#' @param method Character. One of: "Z-score", "Median Scaling"
-#' @param negative_controls Character vector. IDs of negative controls (required for Z-score)
-#' @return Numeric vector. Normalized expression values
-#' @details
-#' **Z-score normalization:**
-#' - Uses user-selected negative controls
-#' - Normalized = (Expression - median_controls) / mad_controls
-#' - Robust to outliers
-#' 
-#' **Median Scaling:**
-#' - Normalized = Expression / median(Expression)
-#' - Simple centering around median
-#' 
-#' @examples
-#' norm_expr <- normalize_channel(expr_vec, ids, "Z-score", c("PBS_1X", "Blank"))
+#' Thin wrapper around the intra-sample normalization methods defined in
+#' R/server/normalization.R. Kept for backwards compatibility with the batch
+#' pipeline; the actual maths live in the normalization module.
+#'
+#' @param expression Numeric vector. Expression values (log-ratios).
+#' @param ids Character vector. Analyte IDs matching expression vector.
+#' @param method Character. Currently only "Z-score" (robust, control-based).
+#' @param negative_controls Character vector. IDs of negative controls.
+#' @return Numeric vector. Normalized expression values.
+#' @seealso normalize_zscore_controls
 normalize_channel <- function(expression, ids, method = "Z-score", negative_controls = NULL) {
-  # Replace Inf/-Inf with NA (will be handled later)
-  expression[is.infinite(expression)] <- NA
-  
   if (method == "Z-score") {
-    if (is.null(negative_controls) || length(negative_controls) == 0) {
-      stop("Z-score normalization requires negative_controls parameter")
-    }
-    
-    # Get control values
-    control_mask <- ids %in% negative_controls
-    if (sum(control_mask) == 0) {
-      stop("No negative controls found in data. Check control IDs.")
-    }
-    
-    control_vals <- expression[control_mask]
-    median_ctrl <- median(control_vals, na.rm = TRUE)
-    mad_ctrl <- mad(control_vals, na.rm = TRUE)
-    
-    # Fallback to SD if MAD is zero
-    if (mad_ctrl == 0 || is.na(mad_ctrl)) {
-      warning("MAD of controls is zero. Using standard deviation instead.")
-      mad_ctrl <- sd(control_vals, na.rm = TRUE)
-    }
-    
-    # Final check: if still zero or NA, cannot normalize
-    if (is.na(mad_ctrl) || mad_ctrl == 0) {
-      stop("Cannot normalize: negative controls have zero variance. Check your control selection.")
-    }
-    
-    normalized <- (expression - median_ctrl) / mad_ctrl
-    
-  } else if (method == "Median Scaling") {
-    median_expr <- median(expression, na.rm = TRUE)
-    
-    if (is.na(median_expr) || median_expr == 0) {
-      stop("Cannot apply Median Scaling: median expression is zero or NA")
-    }
-    
-    normalized <- expression / median_expr
-    
-  } else {
-    stop("Invalid normalization method. Use: 'Z-score' or 'Median Scaling'")
+    return(normalize_zscore_controls(expression, ids, negative_controls))
   }
-  
-  return(normalized)
+  stop("Invalid intra-sample normalization method. Only 'Z-score' is supported.")
 }
 
-
-#' Normalize Microarray Expression Data
-#' 
-#' Applies normalization method to expression values
-#'
-#' @param df Tibble with columns: ID, Expression
-#' @param method Character. One of: "Z-score", "Quantile", "Median Scaling"
-#' @param negative_controls Character vector. IDs of negative controls (default: "PBS_1X")
-#' @return Tibble with additional column: MExpression (normalized expression)
-#' @details
-#' **Z-score normalization:**
-#' - Uses user-selected negative controls
-#' - MExpression = (Expression - median_controls) / mad_controls
-#' - Robust to outliers (uses median + MAD instead of mean + SD)
-#' 
-#' **Quantile normalization:**
-#' - Forces expression distribution to be identical across samples
-#' - Uses preprocessCore::normalize.quantiles()
-#' 
-#' **Median Scaling:**
-#' - MExpression = Expression / median(Expression)
-#' - Simple centering around median
-#' 
-#' @examples
-#' df_norm <- normalize_expression(df, method = "Z-score")
-normalize_expression <- function(df, method = "Z-score", negative_controls = c("PBS_1X")) {
-  if (method == "Z-score") {
-    df$MExpression <- normalize_channel(
-      df$Expression, 
-      df$ID, 
-      method = "Z-score", 
-      negative_controls = negative_controls
-    )
-  } else if (method == "Quantile") {
-    # Quantile normalization
-    df <- df %>%
-      dplyr::mutate(
-        MExpression = normalize.quantiles(as.matrix(df$Expression))
-      )
-  } else if (method == "Median Scaling") {
-    df$MExpression <- normalize_channel(
-      df$Expression, 
-      df$ID, 
-      method = "Median Scaling"
-    )
-  } else {
-    stop("Invalid normalization method. Use: 'Z-score', 'Quantile', or 'Median Scaling'")
-  }
-  
-  return(df)
-}
 
 
 #' Process Multiple Microarray Files (Dual-Channel Support)

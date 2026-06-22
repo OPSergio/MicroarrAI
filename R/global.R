@@ -88,6 +88,12 @@ library(MLmetrics)     # Additional ML metrics for multiclass classification
 # SERVER MODULES
 # =============================================================================
 
+# Normalization methods (intra- and inter-sample), dependency-free
+source("R/server/normalization.R", encoding = "UTF-8")
+
+# Missing-value diagnostics and imputation
+source("R/server/imputation.R", encoding = "UTF-8")
+
 # Data processing and file handling
 source("R/server/data_processing.R", encoding = "UTF-8")
 
@@ -179,3 +185,11 @@ options(shiny.maxRequestSize = 100 * 1024^2)
 # Disable scientific notation for better readability
 # Display full numbers instead of 1.23e+05 format
 options(scipen = 999)
+
+# Unify discrete plot colours app-wide: every ggplot that doesn't set an explicit
+# scale now draws groups from the corporate palette (MICROARRAI_COLORS), so 2D
+# ordination plots stop mixing red/blue vs green/blue and match the 3D views.
+options(
+  ggplot2.discrete.colour = MICROARRAI_COLORS,
+  ggplot2.discrete.fill   = MICROARRAI_COLORS
+)

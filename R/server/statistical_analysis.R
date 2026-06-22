@@ -6,8 +6,20 @@
 # Documentation: docs/statistical_analysis.md
 # ============================================================================
 
+#' Volcano significance line position for the displayed Y metric
+#'
+#' On the FDR axis the dashed line sits at -log10(padj_thr). On the p-value axis
+#' it sits at the effective nominal p of that FDR cut (largest raw p still
+#' significant), so the line keeps its meaning when the axis is switched.
+volcano_threshold_y <- function(tb, padj_thr, on_pval) {
+  if (!on_pval) return(-log10(padj_thr))
+  p_cut <- suppressWarnings(max(tb$p[tb$padj <= padj_thr], na.rm = TRUE))
+  if (is.finite(p_cut)) -log10(p_cut) else -log10(padj_thr)
+}
+
+
 #' Perform Differential Expression Analysis
-#' 
+#'
 #' Compares expression between groups using appropriate statistical tests
 #'
 #' @param peptide_data Tibble with id + peptide columns
@@ -511,10 +523,10 @@ perform_lm_twogroup <- function(df_long, target_levels) {
       # Calculate fold change
       fold_change = purrr::map_dbl(data, ~{
         if (nrow(.x) > 0) {
-          means <- .x %>% group_by(target) %>% 
+          means <- .x %>% group_by(target) %>%
             summarise(m = mean(Expression, na.rm = TRUE), .groups = "drop")
           if (nrow(means) == 2) {
-            log2(means$m[2] / means$m[1])
+            means$m[2] - means$m[1]  # data already log/z-scored: difference, not ratio
           } else {
             NA_real_
           }

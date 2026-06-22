@@ -98,10 +98,10 @@ create_3d_scatter <- function(x, y, z, groups,
     groups <- as.factor(groups)
   }
   
-  # Default surface colors
+  # Default to the corporate palette so 3D scatters match the 2D plots
   if (is.null(surface_col)) {
-    surface_col <- c("#E64B35FF", "#4DBBD5FF", "#00A087FF", "#3C5488FF", 
-                     "#F39B7FFF", "#8491B4FF", "#91D1C2FF", "#DC0000FF")
+    surface_col <- if (exists("MICROARRAI_COLORS")) MICROARRAI_COLORS else
+      c("#1F78B4", "#18BC9C", "#CCBE93", "#A6CEE3", "#2C3E50", "#E31A1C")
   }
   
   # When ellipsoid is TRUE, disable surface to avoid clutter

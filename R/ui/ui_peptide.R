@@ -8,7 +8,12 @@
 ui_peptide <- function() {
   tabPanel(
     title = "Peptide finder",
-    
+
+    tags$head(
+      tags$script(src = "https://d3js.org/d3.v7.min.js"),
+      tags$script(src = "volcano_d3.js")
+    ),
+
     # Floating Sidebar (SAME STYLE AS ML)
     tags$div(
       id = "peptide-sidebar",
@@ -276,29 +281,30 @@ ui_peptide <- function() {
             tags$div(
               style = "margin-top: 15px;",
               sliderInput(
-                "volcano_lfc_thr", 
-                dark_label("Fold Change Threshold (|log2FC|):"),
-                min = 0, max = 3, value = 1, step = 0.1
+                "volcano_lfc_thr",
+                dark_label("Effect-size threshold (|mean diff|):"),
+                min = 0, max = 2, value = 0.5, step = 0.05
               ),
-              tags$small("Minimum absolute log2 fold change to consider a feature significant", style = "color: #666;")
+              tags$small("Minimum absolute mean difference (normalized units) for a feature to be coloured significant. Set to 0 to colour by FDR only.", style = "color: #666;")
             ),
             
             tags$div(
               style = "margin-top: 15px;",
               sliderInput(
-                "volcano_padj_thr", 
-                dark_label("FDR Threshold (Benjamini-Hochberg):"),
+                "volcano_padj_thr",
+                dark_label("Significance threshold:"),
                 min = 0, max = 0.2, value = 0.05, step = 0.005
               ),
-              tags$small("False Discovery Rate threshold for multiple testing correction", style = "color: #666;")
+              tags$small("Applied to whichever metric the Y axis shows (FDR or raw p-value).", style = "color: #666;")
             ),
             
-            checkboxInput(
-              "volcano_interactive", 
-              "Interactive plot (plotly)", 
-              value = TRUE
+            radioButtons(
+              "volcano_yaxis",
+              dark_label("Y axis:"),
+              choices = c("FDR (p-adjust)" = "padj", "p-value" = "pval"),
+              selected = "padj"
             ),
-            
+
             tags$hr(),
             
             downloadButton(
@@ -310,7 +316,8 @@ ui_peptide <- function() {
           ),
           column(
             9,
-            uiOutput("volcano_plot_container"),
+            # Native D3 volcano (www/volcano_d3.js): recolours/relabels instantly
+            tags$div(id = "volcano-d3", style = "width:100%; min-height:520px;"),
             br(),
             tags$h4("Significant Features", style = "color: #191c32; margin: 20px 0 15px 0; font-weight: bold;"),
             DT::DTOutput("volcano_hits_table")

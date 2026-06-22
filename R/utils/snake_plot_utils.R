@@ -100,7 +100,7 @@ prepare_snake_data <- function(Structure_info, peptide_means, signal_length,
   message("[PREPARE_SNAKE] Biomarkers after join: ", nrow(biomarkers_after_join))
   
   AA_expression_summary <- AA_expression %>%
-    dplyr::group_by(Pos, AA_Pep, mod, is_signal, Risk2) %>%
+    dplyr::group_by(Pos, AA_Pep, mod, is_signal, group) %>%
     dplyr::summarise(
       expr_mean = mean(expr_mean, na.rm = TRUE),
       is_biomarker = any(is_biomarker),
@@ -119,18 +119,18 @@ prepare_snake_data <- function(Structure_info, peptide_means, signal_length,
   # Añadir filas para el péptido señal (sin datos de expresión)
   if (signal_length > 0) {
     # Obtener los grupos reales de los datos (NO hardcodear H/L)
-    actual_groups <- unique(peptide_means$Risk2)
+    actual_groups <- unique(peptide_means$group)
     
     signal_peptide_rows <- uniprot_info %>%
       dplyr::filter(is_signal) %>%
-      tidyr::crossing(Risk2 = actual_groups) %>%  # ← Usar grupos dinámicos
+      tidyr::crossing(group = actual_groups) %>%  # ← Usar grupos dinámicos
       dplyr::mutate(
         AA_Pep = AA,
         expr_mean = NA_real_,
         is_biomarker = FALSE,
         biomarker_id = NA_character_
       ) %>%
-      dplyr::select(Pos, AA_Pep, mod, is_signal, Risk2, expr_mean, is_biomarker, biomarker_id)
+      dplyr::select(Pos, AA_Pep, mod, is_signal, group, expr_mean, is_biomarker, biomarker_id)
     
     AA_expression_summary <- dplyr::bind_rows(
       signal_peptide_rows,
@@ -186,7 +186,7 @@ prepare_snake_data <- function(Structure_info, peptide_means, signal_length,
     dplyr::filter(is_signal == TRUE)
   
   Protein_plot <- Protein_plot %>%
-    dplyr::filter(!is.na(Risk2))
+    dplyr::filter(!is.na(group))
   
   list(
     AA_expression_summary = AA_expression_summary,
@@ -255,7 +255,7 @@ create_snake_plot <- function(Protein_plot, PTM_plot, Biomarker_plot, Signal_plo
     ) +
     ggplot2::coord_equal() +
     # Dynamic facet based on user selection
-    {if (facet_type == "vertical") ggplot2::facet_grid(Risk2 ~ .) else ggplot2::facet_grid(~ Risk2)} +
+    {if (facet_type == "vertical") ggplot2::facet_grid(group ~ .) else ggplot2::facet_grid(~ group)} +
     ggplot2::theme_void() +
     ggplot2::theme(
       legend.position = "right",

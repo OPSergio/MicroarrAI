@@ -22,6 +22,13 @@ uniprot_AA_Pos_mod <- function(uniprot_id) {
     signal_len <- 0
   }
   
+  # Disulfide bonds (FT DISULFID  66..160)
+  ss_lines <- ft[grepl("^FT\\s+DISULFID", ft)]
+  disulfides <- Filter(Negate(is.null), lapply(ss_lines, function(l) {
+    nums <- as.integer(unlist(regmatches(l, gregexpr("[0-9]+", l))))
+    if (length(nums) >= 2) c(nums[1], nums[2]) else NULL
+  }))
+
   # Obtener modificaciones post-traduccionales
   mod_idx <- grep("^FT\\s+MOD_RES", ft)
   
@@ -57,8 +64,9 @@ uniprot_AA_Pos_mod <- function(uniprot_id) {
   message(sprintf("ℹ️  Secuencia procesada: Péptido señal (1-%d), Proteína madura (%d-%d), Total: %d AA", 
                   signal_len, signal_len + 1, nrow(result), nrow(result)))
   
-  # Retornar con signal_length como atributo
+  # Retornar con signal_length y disulfuros como atributos
   attr(result, "signal_length") <- signal_len
+  attr(result, "disulfides") <- disulfides
   result
 }
 
@@ -119,7 +127,8 @@ get_protein_info <- function(uniprot_id, peptide_length = 20, offset = 3) {
   list(
     uniprot_info = uniprot_info,
     signal_length = signal_length,
-    Structure_info = Structure_info
+    Structure_info = Structure_info,
+    disulfides = attr(uniprot_info, "disulfides")
   )
 }
 

@@ -82,20 +82,25 @@ dark_label <- function(text) {
 }
 
 #' Create Loading Spinner Overlay
-#' 
-#' Full-screen loading indicator with GIF
+#'
+#' Full-screen CSS spinner shown while a long task runs (toggled via shinyjs).
 #'
 #' @param id Element ID (default: "loader")
-#' @param gif_src Path to loading GIF (default: assets/Carga.gif)
+#' @param label Text shown under the spinner
+#' @param gif_src Deprecated, ignored (kept for backward compatibility)
 #' @return tags$div with fixed positioning
-loading_overlay <- function(id = "loader", gif_src = "assets/Carga.gif") {
+loading_overlay <- function(id = "loader", label = "Running statistical tests…", gif_src = NULL) {
   tags$div(
     id = id,
-    style = "position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-             z-index: 9999; text-align: center; background-color: rgba(0, 0, 0, 0.5); 
-             width: 100%; height: 100%; display: none; align-items: center; 
-             justify-content: center; border-radius: 20px;",
-    tags$img(src = gif_src, height = "200px", width = "200px")
+    style = "position: fixed; inset: 0; z-index: 9999; display: none;
+             background-color: rgba(25, 28, 50, 0.55);",
+    tags$style(HTML("@keyframes microarrai-spin { to { transform: rotate(360deg); } }")),
+    tags$div(
+      style = "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #fff;",
+      tags$div(style = "width: 64px; height: 64px; margin: 0 auto 18px; border: 6px solid rgba(255,255,255,0.25);
+                        border-top-color: #17a589; border-radius: 50%; animation: microarrai-spin 0.9s linear infinite;"),
+      tags$div(label, style = "font-size: 16px; font-weight: 600; letter-spacing: .02em;")
+    )
   )
 }
 
@@ -151,4 +156,23 @@ centered_content <- function(..., height = "100%") {
 #' @return fluidRow with specified height
 spacer <- function(height = 40) {
   fluidRow(style = sprintf("margin-top: %dpx;", height))
+}
+
+
+#' PowerBI-style KPI Card
+#'
+#' Flat tile with a small uppercase label and a large value. Used in the Data
+#' Overview grid.
+#'
+#' @param label Metric name (small uppercase).
+#' @param value Metric value (large number/text).
+#' @param accent Top-border accent colour.
+#' @return A tags$div KPI tile.
+kpi_card <- function(label, value, accent = "#17a589") {
+  tags$div(
+    style = paste0("background:#fff;border:1px solid #e6e8ec;border-top:3px solid ", accent,
+                   ";border-radius:8px;padding:16px 18px;min-height:92px;margin-bottom:16px;"),
+    tags$div(label, style = "font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#8a8f98;font-weight:600;margin-bottom:8px;"),
+    tags$div(value, style = "font-size:28px;font-weight:700;color:#191c32;line-height:1.1;")
+  )
 }

@@ -57,10 +57,24 @@
 #' result <- train_model_advanced(data, model_type = "rf", use_cv = TRUE)
 #' 
 #' # Training with RFE
+#' caret "xgbTree" method that avoids the deprecated `ntreelimit`
+#'
+#' caret 6.0.94 predicts intermediate tree counts via its "submodel" mechanism
+#' with `ntreelimit`, which xgboost >= 1.6 deprecated (flooding the console).
+#' Disabling `$loop` removes that submodel optimisation: caret instead fits each
+#' grid candidate at its own nrounds and predicts the full model (no ntreelimit).
+#' caret's original — and correct — predict/prob are kept untouched, so model
+#' performance is identical; only the deprecated code path is avoided.
+xgbtree_method_fixed <- function() {
+  m <- caret::getModelInfo("xgbTree", regex = FALSE)[[1]]
+  m$loop <- NULL
+  m
+}
+
 #' result <- train_model_advanced(data, model_type = "svm", use_rfe = TRUE, use_cv = TRUE)
 #'
 #' @export
-train_model_advanced <- function(data, 
+train_model_advanced <- function(data,
                                   model_type = c("c50", "rf", "svm", "xgboost"),
                                   use_rfe = FALSE,
                                   use_cv = TRUE,
@@ -305,18 +319,19 @@ train_model_advanced <- function(data,
   message("[DEBUG] About to call caret::train() with metric=", train_metric, "...")
   flush.console()
   
+  # xgboost: use a patched method that calls iteration_range instead of the
+  # deprecated ntreelimit, so caret's submodel predictions don't flood the log.
+  caret_method <- switch(model_type,
+    "c50" = "C5.0", "rf" = "rf", "svm" = "svmLinear",
+    "xgboost" = xgbtree_method_fixed())
+
   # Wrap in tryCatch to surface errors in Shiny
   model_trained <- tryCatch(
     {
       caret::train(
         target ~ .,
         data = data,
-        method = switch(model_type,
-          "c50" = "C5.0",
-          "rf" = "rf",
-          "svm" = "svmLinear",
-          "xgboost" = "xgbTree"
-        ),
+        method = caret_method,
         trControl = ctrl_cv,
         tuneGrid = tune_grid,
         metric = train_metric
@@ -938,28 +953,34 @@ calculate_shap_values <- function(xgb_result) {
 #' model <- train_randomforest_model(ml_data)
 #'
 #' @export
-prepare_ml_data <- function(data, group_var, id_column = "id") {
-  
+prepare_ml_data <- function(data, group_var, id_column = "id", impute_method = "knn") {
+
   # Input validation
   if (!is.data.frame(data)) {
     stop("Input 'data' must be a data.frame")
   }
-  
+
   if (!group_var %in% colnames(data)) {
     stop(paste("Group variable", group_var, "not found in data"))
   }
-  
+
   if (!id_column %in% colnames(data)) {
     stop(paste("ID column", id_column, "not found in data"))
   }
-  
-  # Preprocess
+
+  # Preprocess: drop rows without a label (can't train on unknown target)
   ml_data <- data %>%
     dplyr::mutate(across(where(is.character), as.factor)) %>%
     dplyr::rename(target = !!rlang::sym(group_var)) %>%
-    dplyr::mutate(target = as.factor(target)) %>%
+    dplyr::filter(!is.na(target)) %>%
+    dplyr::mutate(target = droplevels(as.factor(target))) %>%
     tibble::column_to_rownames(var = id_column)
-  
+
+  # Drop all-NA predictors, then impute the rest with the same knn/rf method used
+  # for peptides (clinical metadata may still carry NAs).
+  ml_data <- ml_data[, vapply(ml_data, function(x) any(!is.na(x)), logical(1)), drop = FALSE]
+  ml_data <- impute_missing_mixed(ml_data, method = impute_method)
+
   return(ml_data)
 }
 
@@ -1179,16 +1200,18 @@ create_decision_boundary_plot <- function(data, model_type, important_vars,
 #' @export
 format_varimp_df <- function(varimp_obj, top_n = 30) {
   if (is.null(varimp_obj)) return(NULL)
-  
+
   df <- as.data.frame(varimp_obj$importance)
-  
-  df <- df %>%
-    tibble::rownames_to_column("Feature") %>%
-    dplyr::rename(Importance = Overall) %>%
-    dplyr::arrange(desc(Importance)) %>%
-    dplyr::slice_head(n = top_n)
-  
-  return(df)
+  if (ncol(df) == 0 || nrow(df) == 0) return(NULL)
+
+  # caret returns "Overall" for most models, but per-class columns for 2-class
+  # SVM/others — fall back to the row mean of the numeric importance columns.
+  num <- df[, vapply(df, is.numeric, logical(1)), drop = FALSE]
+  imp <- if ("Overall" %in% names(df)) df$Overall else rowMeans(num, na.rm = TRUE)
+
+  out <- data.frame(Feature = rownames(df), Importance = imp, stringsAsFactors = FALSE)
+  out <- out[order(-out$Importance), , drop = FALSE]
+  utils::head(out, top_n)
 }
 
 #' Plot Variable Importance Histogram (Unified Approach)
