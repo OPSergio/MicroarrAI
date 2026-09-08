@@ -308,23 +308,41 @@
     if (PV.viewer && PV.loadedKey === k) { colorResidues(); addDisulfides(); updateSurface(); PV.viewer.render(); return; }
     const el = document.getElementById("pv-3d"); el.innerHTML = "";
     PV.viewer = $3Dmol.createViewer(el, { backgroundColor: "white" });
-    PV.loadedKey = k;
+    // Only remember the key once a model is actually on screen. Recording it up
+    // front meant a failed load was cached: coming back to the same protein hit
+    // the early-return above and repainted an empty viewer, so it never retried.
+    PV.loadedKey = null;
+    const loaded = () => { PV.loadedKey = k; applyStructure(); };
+    const failed = why => {
+      el.innerHTML = "<div style='padding:18px;color:#888;font:13px system-ui'>" + why +
+        "<br><span style='font-size:12px'>Reload the protein to try again.</span></div>";
+      structureDone();
+    };
 
     // The server resolves which structure to show and hands over a ready URL or
     // a PDB id; guessing the AlphaFold filename here stopped working.
     if (PV.structureUrl) {
       fetch(PV.structureUrl)
         .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
-        .then(txt => { PV.viewer.addModel(txt, "pdb"); applyStructure(); })
-        .catch(() => {
-          el.innerHTML = "<div style='padding:18px;color:#888;font:13px system-ui'>Could not load the model</div>";
-          structureDone();
-        });
+        .then(txt => { PV.viewer.addModel(txt, "pdb"); loaded(); })
+        .catch(() => failed("Could not load the model"));
     } else if (PV.pdb) {
-      $3Dmol.download("pdb:" + PV.pdb, PV.viewer, {}, applyStructure);
+      // $3Dmol.download has no error path of its own: if RCSB has no legacy
+      // .pdb for the entry (common for large EM structures) the callback never
+      // fires, the viewer stays blank and the loading overlay never clears.
+      let done = false;
+      const guard = setTimeout(() => {
+        if (!done) failed("Could not load PDB " + String(PV.pdb).toUpperCase());
+      }, 15000);
+      $3Dmol.download("pdb:" + PV.pdb, PV.viewer, {}, function () {
+        done = true; clearTimeout(guard);
+        if (PV.viewer.getModel()) loaded();
+        else failed("PDB " + String(PV.pdb).toUpperCase() + " returned no usable model");
+      });
     } else {
       el.innerHTML = "<div style='padding:18px;color:#888;font:13px system-ui'>" +
         "No reliable structure for " + (PV.uniprot || "this protein") + " — 2D view only</div>";
+      PV.loadedKey = k;
       structureDone();
     }
   }

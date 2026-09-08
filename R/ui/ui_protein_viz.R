@@ -114,7 +114,7 @@ ui_protein_viz <- function() {
           ),
           tags$div(class = "pv-right",
             tags$div(class = "pv-card", style = "height:100%;",
-              tags$h4("3D structure (AlphaFold)"), tags$div(id = "pv-3d"))
+              uiOutput("protein_structure_title"), tags$div(id = "pv-3d"))
           )
         )
       )

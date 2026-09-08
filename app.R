@@ -1279,10 +1279,16 @@ output$normalization_method_description <- renderUI({
   })
   
   
+  # Single source of truth for "which clinical variable are we analysing".
+  # Every other tab inherits this unless it explicitly overrides it; before, five
+  # independent selectors could silently point at different variables, which is
+  # why the Feature Level and volcano tables disagreed.
+  global_target_var <- reactive({ input$stats })
+
   output$stats_var <- renderUI({
     req(database())
     selectInput("stats", 
-                label = tags$span(style = "color: #191c32;", "Choose grouping var to analysis"),
+                label = tags$span(style = "color: #191c32;", "Target variable (used by every tab)"),
                 choices = colnames(meta_data() %>% 
                                      dplyr::select((ncol(pepdata()) +1):ncol(meta_data())) %>% 
                                      as.data.frame())) 
@@ -1719,10 +1725,28 @@ output$normalization_method_description <- renderUI({
     db <- active_database()
     facs <- names(db)[vapply(db, function(x) is.factor(x) || is.character(x), logical(1))]
     facs <- setdiff(facs, "id")
-    # Default to the SAME contrast the differential analysis runs with (input$stats),
-    # not just the first factor (which was landing on e.g. 'sexo').
-    sel <- if (!is.null(input$stats) && input$stats %in% facs) input$stats else facs[1]
-    selectInput("volcano_group_var", dark_label("Contrast Variable:"), choices = facs, selected = sel)
+    # Inherit the global target. isolate() so that changing the target updates the
+    # selection (below) instead of re-rendering the input and wiping the A/B levels.
+    sel <- isolate(global_target_var())
+    if (is.null(sel) || !sel %in% facs) sel <- facs[1]
+    tagList(
+      selectInput("volcano_group_var", dark_label("Contrast Variable:"),
+                  choices = facs, selected = sel),
+      checkboxInput("volcano_override_var",
+                    "Contrast a different variable than the target", value = FALSE)
+    )
+  })
+
+  # Keep the volcano on the global target unless the user deliberately opted out.
+  observeEvent(list(global_target_var(), input$volcano_override_var), {
+    req(global_target_var())
+    if (isTRUE(input$volcano_override_var)) return()
+    updateSelectInput(session, "volcano_group_var", selected = global_target_var())
+  }, ignoreInit = TRUE)
+
+  observe({
+    shinyjs::toggleState("volcano_group_var",
+                         condition = isTRUE(input$volcano_override_var))
   })
   
   # Niveles A y B (contraste binario)
@@ -1745,11 +1769,14 @@ output$normalization_method_description <- renderUI({
     validate(need(input$volcano_level_a != input$volcano_level_b,
                   "Choose levels"))
     
-    # merge pep + clínica y filtra contraste binario
+    # merge pep + clínica. NO se filtra a los dos niveles del contraste: el lm()
+    # se ajusta sobre TODOS los grupos y de ahí se lee el coeficiente A -> B, que
+    # es lo que permite pedir A-B, B-C o A-C del mismo modelo. Con dos grupos el
+    # resultado es idéntico al t-test pooled que había antes.
     dat <- dplyr::inner_join(pepdata(), active_database(), by = "id") %>%
-      dplyr::filter(.data[[input$volcano_group_var]] %in% c(input$volcano_level_a, input$volcano_level_b)) %>%
-      dplyr::mutate(.grp = factor(.data[[input$volcano_group_var]],
-                                  levels = c(input$volcano_level_a, input$volcano_level_b)))
+      dplyr::filter(!is.na(.data[[input$volcano_group_var]])) %>%
+      dplyr::mutate(.grp = stats::relevel(
+        factor(.data[[input$volcano_group_var]]), ref = input$volcano_level_a))
     
     # columnas peptídicas numéricas
     pep_cols <- setdiff(names(pepdata()), "id")
@@ -1792,27 +1819,16 @@ output$normalization_method_description <- renderUI({
         )
     }
     
-    # resumen por feature: log2FC + t.test + FDR
+    # resumen por feature: un lm() por feature, del que se lee el contraste
+    # seleccionado. El estimate sigue siendo mean(B) - mean(A) (los datos ya están
+    # en escala log/z, así que el fold change es una diferencia, no un cociente),
+    # pero el p usa la varianza residual agrupada de todos los grupos.
+    lvl_a <- input$volcano_level_a
+    lvl_b <- input$volcano_level_b
     res <- long %>%
       dplyr::group_by(peptide, isotype) %>%
-      dplyr::summarise(
-        nA    = sum(.grp == levels(.grp)[1], na.rm = TRUE),
-        nB    = sum(.grp == levels(.grp)[2], na.rm = TRUE),
-        meanA = mean(expr[.grp == levels(.grp)[1]], na.rm = TRUE),
-        meanB = mean(expr[.grp == levels(.grp)[2]], na.rm = TRUE),
-        # Data is already on a log/z-score scale, so the fold change is the
-        # difference of group means (ratios/logs would produce NaN on negatives).
-        log2FC = meanB - meanA,
-        p = {
-          g1 <- expr[.grp == levels(.grp)[1]]; g1 <- g1[is.finite(g1)]
-          g2 <- expr[.grp == levels(.grp)[2]]; g2 <- g2[is.finite(g2)]
-          # Pooled t-test (var.equal) matches the lm() used in the Differential
-          # Expression table, so per-peptide raw p-values agree.
-          if (length(g1) < 2 || length(g2) < 2) NA_real_
-          else tryCatch(stats::t.test(g2, g1, var.equal = TRUE)$p.value, error = function(e) NA_real_)
-        },
-        .groups = "drop"
-      ) %>%
+      dplyr::group_modify(~ lm_contrast(.x$expr, .x$.grp, lvl_a, lvl_b)) %>%
+      dplyr::ungroup() %>%
       dplyr::mutate(
         padj = p.adjust(p, method = "BH"),
         neglog10_p = -log10(p),
@@ -4258,7 +4274,9 @@ output$normalization_method_description <- renderUI({
     } else if (!is.null(input$h_target)) {
       return(input$h_target[1])  # Take first if multiple
     }
-    NULL
+    # Inherit rather than give up: returning NULL here left the protein tab with
+    # its hardcoded "group" default whenever the ML/PCA tabs had not been opened.
+    global_target_var()
   })
   
   # ML Target Variable Selector
@@ -4478,7 +4496,11 @@ output$normalization_method_description <- renderUI({
     clinical_data = reactive({ active_database() }),
     peptide_data = reactive({ full_pepdata() }),  # ← MATRIZ COMPLETA, no filtrada
     biomarkers = reactive({ selected_biomarkers() }),
-    target = active_target_var()  # Ya es un reactive, no envolver de nuevo
+    # Pass the reactive itself. With target = active_target_var() the promise was
+    # forced once inside the module and frozen at that first value (usually NULL,
+    # which fell through to the hardcoded "group"), so the protein tab never
+    # followed the selected target.
+    target = active_target_var
   )
   
   #### End Protein Visualization ####

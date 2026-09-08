@@ -643,3 +643,45 @@ perform_lm_multigroup <- function(df_long) {
   return(results)
 }
 
+#' Contrast between two levels of a per-feature linear model
+#'
+#' @param expr Numeric vector. Expression values for one feature.
+#' @param grp Factor. Group of each sample, with ALL its levels present.
+#' @param level_a,level_b Character. The two levels being contrasted.
+#' @return One-row tibble: nA, nB, meanA, meanB, log2FC, p.
+#' @details One lm() per feature is fitted over every group, and this reads the
+#'   single A -> B coefficient out of it. Two consequences, both intended:
+#'   the estimate is still mean(B) - mean(A), so the volcano's x axis keeps its
+#'   meaning; and the p-value uses the residual variance pooled over all groups,
+#'   so it has more degrees of freedom than a two-group t-test and comes from
+#'   the same model whose F-test the Feature Level table reports.
+#'   With exactly two groups this is algebraically identical to a pooled t-test.
+lm_contrast <- function(expr, grp, level_a, level_b) {
+  keep <- is.finite(expr) & !is.na(grp)
+  expr <- expr[keep]
+  grp  <- droplevels(factor(grp[keep]))
+
+  out <- tibble::tibble(
+    nA = sum(grp == level_a), nB = sum(grp == level_b),
+    meanA = suppressWarnings(mean(expr[grp == level_a])),
+    meanB = suppressWarnings(mean(expr[grp == level_b])),
+    log2FC = NA_real_, p = NA_real_
+  )
+
+  both_present <- all(c(level_a, level_b) %in% levels(grp))
+  if (!both_present || out$nA < 2 || out$nB < 2 || length(unique(expr)) < 2) {
+    return(out)
+  }
+
+  grp <- stats::relevel(grp, ref = level_a)
+  fit <- tryCatch(stats::lm(expr ~ grp), error = function(e) NULL)
+  if (is.null(fit)) return(out)
+
+  coefs <- stats::coef(summary(fit))
+  term  <- paste0("grp", level_b)
+  if (!term %in% rownames(coefs)) return(out)
+
+  out$log2FC <- coefs[term, "Estimate"]
+  out$p      <- coefs[term, "Pr(>|t|)"]
+  out
+}

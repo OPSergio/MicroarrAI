@@ -530,14 +530,32 @@ server_protein_viz <- function(input, output, session,
     resolve_structure(protein_accession(), nrow(protein_info_data()$uniprot_info))
   })
 
+  # The heading names what is actually on screen; it used to always say
+  # "AlphaFold" even when the viewer had loaded an experimental entry.
+  output$protein_structure_title <- renderUI({
+    s <- protein_structure()
+    tags$h4(switch(s$source,
+      alphafold = "3D structure (AlphaFold)",
+      pdb       = paste0("3D structure (PDB ", toupper(s$pdb_id), ")"),
+      "3D structure"
+    ))
+  })
+
   output$protein_structure_note <- renderUI({
     s <- protein_structure()
-    if (s$source == "alphafold") return(NULL)
 
     tags$div(
       class = "pv-structure-note",
-      tags$b(if (s$source == "pdb") "Experimental structure: " else "2D only: "),
-      paste0(s$reason, ". "), s$detail
+      tags$b(switch(s$source,
+        alphafold = "Predicted structure: ",
+        pdb       = "Experimental structure: ",
+        "2D only: "
+      )),
+      if (!is.null(s$reason)) paste0(s$reason, ". "),
+      s$detail,
+      if (!is.null(s$alternative)) tags$div(
+        style = "margin-top:4px;opacity:.75;", "Also available: ", s$alternative
+      )
     )
   })
 
