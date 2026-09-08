@@ -1,8 +1,10 @@
 # =============================================================================
 # MicroarrAI - Dockerfile
 # =============================================================================
-# Multi-stage build for optimized Shiny application deployment
 # Base: rocker/shiny-verse (includes R, Shiny Server, and tidyverse)
+#
+# The R package set lives in ../dependencies.R, which singularity/MicroarrAI.def
+# uses as well, so the two images install exactly the same thing.
 # =============================================================================
 
 FROM rocker/shiny-verse:4.4.0
@@ -10,7 +12,7 @@ FROM rocker/shiny-verse:4.4.0
 # =============================================================================
 # SYSTEM DEPENDENCIES
 # =============================================================================
-# Install system libraries required for R packages
+# System libraries required to build the R packages listed in dependencies.R
 RUN apt-get update && apt-get install -y \
     # Core development tools
     build-essential \
@@ -39,79 +41,25 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     libsqlite3-dev \
     # Additional utilities
+    # curl is required by the docker-compose healthcheck
     zlib1g-dev \
     git \
     wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
 # R PACKAGE INSTALLATION
 # =============================================================================
-# Install R packages in logical groups for better build caching
-
-# Core tidyverse extensions and fixes for xfun/knitr compatibility
-RUN R -e "install.packages(c('xfun', 'knitr', 'rmarkdown', 'openxlsx'), repos='https://cloud.r-project.org/')"
-
-# Shiny ecosystem
-RUN R -e "install.packages(c( \
-    'shinyWidgets', \
-    'shinydashboard', \
-    'shinycssloaders', \
-    'DT', \
-    'shinyjs', \
-    'shinythemes', \
-    'bslib', \
-    'shinyFiles', \
-    'rhandsontable', \
-    'markdown' \
-    ), repos='https://cloud.r-project.org/')"
-
-# Visualization packages
-RUN R -e "install.packages(c( \
-    'plotly', \
-    'ggpubr', \
-    'cowplot', \
-    'ggrepel', \
-    'ggvenn', \
-    'ggiraph', \
-    'rgl', \
-    'car' \
-    ), repos='https://cloud.r-project.org/')"
-
-# Statistical packages
-RUN R -e "install.packages(c( \
-    'vegan', \
-    'dbscan', \
-    'cluster' \
-    ), repos='https://cloud.r-project.org/')"
-
-# Machine Learning - Part 1 (CRAN packages)
-RUN R -e "install.packages(c( \
-    'C50', \
-    'randomForest', \
-    'e1071', \
-    'kernlab', \
-    'caret', \
-    'xgboost', \
-    'shapviz' \
-    ), repos='https://cloud.r-project.org/')"
-
-# Machine Learning - Part 2 (tidymodels ecosystem)
-RUN R -e "install.packages(c( \
-    'tidymodels', \
-    'parsnip', \
-    'yardstick', \
-    'pROC', \
-    'MLmetrics' \
-    ), repos='https://cloud.r-project.org/')"
-
-# Bioconductor packages (mixOmics)
-RUN R -e "if (!requireNamespace('BiocManager', quietly = TRUE)) install.packages('BiocManager', repos='https://cloud.r-project.org/'); \
-    BiocManager::install('mixOmics', ask = FALSE, update = FALSE); \
-    if (!require('mixOmics', character.only = TRUE)) stop('Failed to install mixOmics! Check Docker build logs for missing system dependencies.')"
-
-# Install additional packages (ggpubr)
-RUN R -e "install.packages('ggpubr')"
+# Copied on its own so the (long) install layer is only rebuilt when the
+# dependency list actually changes, not on every application edit.
+#
+# No repos= override here on purpose: the rocker base image pins CRAN to a dated
+# Posit Package Manager snapshot, which gives reproducible versions and prebuilt
+# Linux binaries. Overriding it with cloud.r-project.org would force every
+# package to be compiled from source and un-pin the whole image.
+COPY dependencies.R /tmp/dependencies.R
+RUN Rscript /tmp/dependencies.R install && rm /tmp/dependencies.R
 
 # =============================================================================
 # APPLICATION DEPLOYMENT
@@ -133,7 +81,7 @@ COPY Def ./Def
 COPY docs ./docs
 COPY R ./R
 COPY app.R .
-COPY global.R .
+COPY dependencies.R .
 
 # Set proper permissions for Shiny Server
 RUN chown -R shiny:shiny /srv/shiny-server/MicroarrAI
@@ -141,9 +89,10 @@ RUN chown -R shiny:shiny /srv/shiny-server/MicroarrAI
 # =============================================================================
 # SHINY SERVER CONFIGURATION
 # =============================================================================
-
-# Copy custom Shiny Server configuration (optional - see shiny-server.conf)
-# COPY shiny-server.conf /etc/shiny-server/shiny-server.conf
+# Enabled so the app gets the longer init timeout it needs: loading mixOmics,
+# caret and the rest of R/global.R takes well over the 60s default on a cold
+# start, which otherwise surfaces to the user as "an error has occurred".
+COPY docker/shiny-server.conf /etc/shiny-server/shiny-server.conf
 
 # Expose port 3838 (default Shiny Server port)
 EXPOSE 3838
@@ -152,21 +101,24 @@ EXPOSE 3838
 # RUNTIME
 # =============================================================================
 
+# Fail fast if the image is missing a package the app needs
+RUN Rscript /srv/shiny-server/MicroarrAI/dependencies.R check
+
 # Run Shiny Server
 CMD ["/usr/bin/shiny-server"]
 
 # =============================================================================
 # BUILD INSTRUCTIONS
 # =============================================================================
-# Build the image:
-#   docker build -t microarrai:latest .
+# Build the image (from the repository root, the build context is ..):
+#   docker compose -f docker/docker-compose.yml build
 #
 # Run the container:
-#   docker run --rm -p 3838:3838 microarrai:latest
+#   docker compose -f docker/docker-compose.yml up -d
 #
 # Access the app:
 #   http://localhost:3838/MicroarrAI
 #
-# Run with persistent data volume:
-#   docker run --rm -p 3838:3838 -v $(pwd)/data:/srv/shiny-server/MicroarrAI/data microarrai:latest
+# Users upload their own scan files through the browser; no host data directory
+# is mounted and nothing user-supplied is stored in the image.
 # =============================================================================

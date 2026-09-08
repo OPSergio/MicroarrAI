@@ -27,13 +27,14 @@ ui_navbar <- function() {
       tags$a(
         class = "metis-brand",
         onclick = "metisNav('Home', null)",
-        tags$span(class = "metis-wordmark", "METIS")
+        tags$span(class = "metis-wordmark", "MicroarrAI")
       ),
 
       # Section links (values match the tabPanel titles)
       tags$nav(
         class = "metis-links",
         metis_link("Preprocessing",     "Preprocess"),
+        metis_link("Quality",           "Quality Control"),
         metis_link("Peptide finder",    "Peptide finder"),
         metis_link("Machine learning",  "Machine Learning"),
         metis_link("3D visualization",  "Protein Visualization"),

@@ -182,11 +182,18 @@ ui_preprocess <- function() {
               column(
                 6,
                 tags$div(
-                  style = "border: 2px dashed #191c32; padding: 20px; border-radius: 8px; text-align: center;",
-                  shinyDirButton('directory', 'Select Folder', 'Choose RAW data folder',
-                                icon = icon("folder-open"), 
-                                style = "font-size: 16px; padding: 12px 30px;"),
-                  br(), br(),
+                  style = "border: 2px dashed #191c32; padding: 20px; border-radius: 8px;",
+                  # Users upload their own scans: a server-side folder browser
+                  # would only ever show the container's filesystem, which holds
+                  # no user data. Uploads are staged per session instead.
+                  fileInput(
+                    "raw_files",
+                    buttonLabel = "Browse...",
+                    label = dark_label("Upload GenePix scan files:"),
+                    multiple = TRUE,
+                    accept = c(".csv", ".txt", ".tsv"),
+                    placeholder = "No files selected"
+                  ),
                   uiOutput("folder_status")
                 )
               ),
@@ -197,9 +204,10 @@ ui_preprocess <- function() {
                   tags$h6(icon("lightbulb"), " Tips:", style = "color: #191c32; margin-bottom: 10px;"),
                   tags$ul(
                     style = "color: #191c32; font-size: 14px;",
-                    tags$li("All GenePix CSV files should be in one folder"),
+                    tags$li("Select all your GenePix scan files at once"),
                     tags$li("Each file = one two-channel microarray"),
-                    tags$li("File names will become sample IDs")
+                    tags$li("File names will become sample IDs"),
+                    tags$li("Files stay in your session and are deleted when you leave")
                   )
                 )
               )
@@ -218,7 +226,32 @@ ui_preprocess <- function() {
                     "pep_fileinput",
                     buttonLabel = "Browse...",
                     label = dark_label("Upload processed matrix:"),
-                    accept = c(".csv", ".xlsx", ".xls")
+                    accept = c(".csv", ".txt", ".tsv", ".xlsx", ".xls")
+                  ),
+                  radioButtons(
+                    "matrix_orientation",
+                    dark_label("Layout:"),
+                    choices = c(
+                      "One row per sample"  = "samples_in_rows",
+                      "One row per feature" = "features_in_rows"
+                    ),
+                    selected = "samples_in_rows"
+                  ),
+                  radioButtons(
+                    "matrix_normalized",
+                    dark_label("Is this matrix already normalized?"),
+                    choices = c("Yes, use it as it is" = "yes",
+                                "No, normalize it now" = "no"),
+                    selected = "yes"
+                  ),
+                  conditionalPanel(
+                    condition = "input.matrix_normalized == 'no'",
+                    selectInput(
+                      "matrix_norm_method",
+                      dark_label("Method:"),
+                      choices = c("Quantile" = "quantile", "Robust (median/MAD)" = "robust"),
+                      selected = "quantile"
+                    )
                   )
                 )
               ),
@@ -230,10 +263,12 @@ ui_preprocess <- function() {
                   tags$h6(icon("lightbulb"), " Required format:", style = "color: #191c32;"),
                   tags$ul(
                     style = "color: #191c32; font-size: 14px;",
-                    tags$li("Column 1: 'id' with sample names"),
+                    tags$li("First column: sample names (or feature names, if one row per feature)"),
                     tags$li("Other columns: numeric expression values"),
-                    tags$li("Optional: channel prefixes (IgE_, IgG4_)")
-                  )
+                    tags$li("Optional: isotype prefixes (IgE_, IgG_, IgM_...)")
+                  ),
+                  tags$p("Public matrices arrive both ways and not always normalized, so both are declared here rather than guessed.",
+                         style = "color: #191c32; font-size: 13px; margin: 8px 0 0;")
                 )
               )
             )
@@ -278,15 +313,23 @@ ui_preprocess <- function() {
               column(
                 6,
                 tags$h5(icon("tag"), " Channel Labels", style = "color: #191c32; margin-bottom: 15px;"),
-                textInput("ch1_label", dark_label("Channel 1 (usually IgE):"), value = "IgE"),
-                textInput("ch2_label", dark_label("Channel 2 (usually IgG4):"), value = "IgG4")
+                uiOutput("channel_labels_ui")
               ),
               column(
                 6,
+                radioButtons(
+                  "spot_metric",
+                  dark_label("Spot signal:"),
+                  choices = c(
+                    "Ratio — log2(signal / background)" = "ratio",
+                    "Difference — signal − background"  = "difference"
+                  ),
+                  selected = "ratio"
+                ),
                 tags$div(
                   style = "background: #fff3cd; padding: 15px; border-radius: 8px; border-left: 4px solid #ffc107;",
                   tags$h6(icon("exclamation-triangle"), " Important:", style = "color: #856404;"),
-                  tags$p("These labels will prefix all feature columns in the output (e.g., IgE_p001, IgG4_p001)",
+                  tags$p("Labels prefix every feature column in the output (e.g., IgE_p001). Use Difference when the array was scanned without a background ratio (common on single-channel arrays).",
                         style = "color: #856404; font-size: 14px; margin: 0;")
                 )
               )

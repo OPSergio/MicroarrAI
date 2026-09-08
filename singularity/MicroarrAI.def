@@ -4,6 +4,10 @@
 # Replicates exactly the same deployment as the Docker/docker-compose setup.
 # Base: rocker/shiny-verse:4.4.0 (R 4.4.0, Shiny Server, tidyverse)
 #
+# The R package set is NOT duplicated here: it lives in dependencies.R at the
+# repository root, which docker/Dockerfile installs the same way. Change the
+# package list there and both images follow.
+#
 # BUILD (from repo root):
 #   singularity build --fakeroot MicroarrAI.sif singularity/MicroarrAI.def
 #   # or as root:
@@ -50,6 +54,11 @@ From: rocker/shiny-verse:4.4.0
     Access the application:
       http://localhost:3838/MicroarrAI
 
+    Loading your data:
+      Users upload their scan files through the browser. They are staged in the
+      session's tempdir and deleted when the session ends, so no user data is
+      written into the image or onto the host.
+
     Stream logs:
       tail -f logs/*.log
 
@@ -59,12 +68,6 @@ From: rocker/shiny-verse:4.4.0
     Open a shell inside the container:
       singularity shell --bind ./logs:/var/log/shiny-server MicroarrAI.sif
 
-    Persistent data:
-      singularity instance start \
-          --bind ./logs:/var/log/shiny-server \
-          --bind ./data:/srv/shiny-server/MicroarrAI/data \
-          MicroarrAI.sif microarrai
-
 # =============================================================================
 # ENVIRONMENT VARIABLES
 # =============================================================================
@@ -73,6 +76,8 @@ From: rocker/shiny-verse:4.4.0
     export LANG=C.UTF-8
     export LC_ALL=C.UTF-8
     export TZ=UTC
+    # Upload ceiling for a whole scan set; see R/global.R
+    export MICROARRAI_MAX_UPLOAD_MB=1024
 
 # =============================================================================
 # APPLICATION FILES
@@ -86,7 +91,7 @@ From: rocker/shiny-verse:4.4.0
     docs            /tmp/microarrai_src/docs
     R               /tmp/microarrai_src/R
     app.R           /tmp/microarrai_src/app.R
-    global.R        /tmp/microarrai_src/global.R
+    dependencies.R  /tmp/microarrai_src/dependencies.R
     singularity/shiny-server-singularity.conf /tmp/microarrai_src/shiny-server.conf
 
 # =============================================================================
@@ -127,78 +132,12 @@ From: rocker/shiny-verse:4.4.0
     && rm -rf /var/lib/apt/lists/*
 
     # -------------------------------------------------------------------------
-    # R PACKAGES - CRAN (mirrors the Dockerfile)
+    # R PACKAGES
     # -------------------------------------------------------------------------
-
-    # tidyverse extensions
-    R -e "install.packages(c('xfun', 'knitr', 'rmarkdown', 'openxlsx'), repos='https://cloud.r-project.org/')"
-
-    # Shiny ecosystem
-    R -e "install.packages(c(
-        'shinyWidgets',
-        'shinydashboard',
-        'shinycssloaders',
-        'DT',
-        'shinyjs',
-        'shinythemes',
-        'bslib',
-        'shinyFiles',
-        'rhandsontable',
-        'markdown'
-        ), repos='https://cloud.r-project.org/')"
-
-    # Visualization
-    R -e "install.packages(c(
-        'plotly',
-        'ggpubr',
-        'cowplot',
-        'ggrepel',
-        'ggvenn',
-        'ggiraph',
-        'rgl',
-        'car'
-        ), repos='https://cloud.r-project.org/')"
-
-    # Statistical packages
-    R -e "install.packages(c(
-        'vegan',
-        'dbscan',
-        'cluster'
-        ), repos='https://cloud.r-project.org/')"
-
-    # Machine Learning - Part 1 (CRAN)
-    R -e "install.packages(c(
-        'C50',
-        'randomForest',
-        'e1071',
-        'kernlab',
-        'caret',
-        'xgboost',
-        'shapviz'
-        ), repos='https://cloud.r-project.org/')"
-
-    # Machine Learning - Part 2 (tidymodels)
-    R -e "install.packages(c(
-        'tidymodels',
-        'parsnip',
-        'yardstick',
-        'pROC',
-        'MLmetrics'
-        ), repos='https://cloud.r-project.org/')"
-
-    # -------------------------------------------------------------------------
-    # R PACKAGES - BIOCONDUCTOR
-    # -------------------------------------------------------------------------
-    R -e "if (!requireNamespace('BiocManager', quietly = TRUE)) \
-              install.packages('BiocManager', repos='https://cloud.r-project.org/'); \
-          BiocManager::install('mixOmics', ask=FALSE, update=FALSE)"
-
-    # -------------------------------------------------------------------------
-    # R PACKAGES - GITHUB
-    # -------------------------------------------------------------------------
-    R -e "if (!requireNamespace('remotes', quietly = TRUE)) \
-              install.packages('remotes', repos='https://cloud.r-project.org/'); \
-          remotes::install_github('Bristol-Vaccine-Centre/shiny.molstar')"
+    # Single source of truth shared with docker/Dockerfile. No repos= override:
+    # the rocker base pins CRAN to a dated Posit Package Manager snapshot, which
+    # gives reproducible versions and prebuilt Linux binaries.
+    Rscript /tmp/microarrai_src/dependencies.R install
 
     # -------------------------------------------------------------------------
     # APPLICATION DEPLOYMENT
@@ -215,8 +154,8 @@ From: rocker/shiny-verse:4.4.0
     cp -r /tmp/microarrai_src/Def   /srv/shiny-server/MicroarrAI/Def
     cp -r /tmp/microarrai_src/docs  /srv/shiny-server/MicroarrAI/docs
     cp -r /tmp/microarrai_src/R     /srv/shiny-server/MicroarrAI/R
-    cp    /tmp/microarrai_src/app.R    /srv/shiny-server/MicroarrAI/app.R
-    cp    /tmp/microarrai_src/global.R /srv/shiny-server/MicroarrAI/global.R
+    cp    /tmp/microarrai_src/app.R          /srv/shiny-server/MicroarrAI/app.R
+    cp    /tmp/microarrai_src/dependencies.R /srv/shiny-server/MicroarrAI/dependencies.R
 
     # Deploy Singularity-compatible Shiny Server configuration
     cp /tmp/microarrai_src/shiny-server.conf /etc/shiny-server/shiny-server.conf
@@ -250,22 +189,12 @@ From: rocker/shiny-verse:4.4.0
 # Equivalent to a basic healthcheck
 # =============================================================================
 %test
-    echo "=== Checking essential R packages ==="
-    R --no-save -e "
-    pkgs <- c('shiny', 'shinydashboard', 'shinyWidgets', 'DT',
-              'plotly', 'ggplot2', 'vegan', 'randomForest',
-              'xgboost', 'caret', 'mixOmics')
-    ok <- sapply(pkgs, requireNamespace, quietly = TRUE)
-    if (all(ok)) {
-        cat('All R packages: OK\n')
-    } else {
-        cat('Missing packages:', paste(pkgs[!ok], collapse=', '), '\n')
-        quit(status = 1)
-    }
-    "
+    echo "=== Checking R packages ==="
+    # Checks the full list in dependencies.R, not a hand-maintained subset
+    Rscript /srv/shiny-server/MicroarrAI/dependencies.R check || exit 1
 
     echo "=== Checking application files ==="
-    for f in app.R global.R; do
+    for f in app.R dependencies.R; do
         test -f /srv/shiny-server/MicroarrAI/$f \
             && echo "$f: OK" \
             || (echo "$f: MISSING" && exit 1)
@@ -275,6 +204,11 @@ From: rocker/shiny-verse:4.4.0
             && echo "$d/: OK" \
             || (echo "$d/: MISSING" && exit 1)
     done
+
+    echo "=== Checking the app parses ==="
+    Rscript -e "invisible(parse('/srv/shiny-server/MicroarrAI/app.R'))" \
+        && echo "app.R parses: OK" \
+        || (echo "app.R FAILED to parse" && exit 1)
 
     echo "=== Checking Shiny Server configuration ==="
     test -f /etc/shiny-server/shiny-server.conf \

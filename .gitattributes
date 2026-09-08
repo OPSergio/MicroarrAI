@@ -1,0 +1,22 @@
+# Files that are executed by Linux (shell, container recipes, server configs)
+# must keep LF endings: a stray CR makes bash fail with "$'\r': command not
+# found" and breaks the %post script inside a Singularity build. Editing them
+# from Windows would otherwise silently reintroduce CRLF.
+*.sh                text eol=lf
+*.def               text eol=lf
+*.conf              text eol=lf
+*.yml               text eol=lf
+*.yaml              text eol=lf
+Dockerfile          text eol=lf
+.dockerignore       text eol=lf
+.gitignore          text eol=lf
+.gitattributes      text eol=lf
+
+# Binary assets: never touch them.
+*.png               binary
+*.jpg               binary
+*.jpeg              binary
+*.gif               binary
+*.xlsx              binary
+*.rds               binary
+*.sif               binary

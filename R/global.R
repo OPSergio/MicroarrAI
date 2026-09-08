@@ -36,7 +36,6 @@ library(DT)               # Interactive DataTables
 library(shinyjs)         # JavaScript integration
 library(shinythemes)     # Predefined themes for Shiny apps
 library(bslib)            # Modern UI components
-library(shinyFiles)       # File system browser widgets
 library(rhandsontable)    # Editable data tables
 library(markdown)         # Markdown to HTML conversion
 # -----------------------------------------------------------------------------
@@ -78,7 +77,9 @@ library(mixOmics)      # Multivariate methods (PLS-DA, sparse PLS)
 # -----------------------------------------------------------------------------
 # Machine Learning - Regression & Model Evaluation
 # -----------------------------------------------------------------------------
-library(tidymodels)    # Meta-package for tidy modeling
+# library(tidymodels)  # DESACTIVADO: no lo usa nadie (el ML va con caret, y
+# parsnip se carga abajo por su cuenta). Además su versión actual no es
+# instalable en R 4.3 desde binarios de CRAN. Revisar antes de reactivar.
 library(parsnip)       # Unified model interface (multinom_reg, etc.)
 library(yardstick)     # Model performance metrics (accuracy, roc_auc, etc.)
 library(pROC)          # ROC curve analysis and AUC calculation
@@ -128,6 +129,7 @@ source("R/server/visualization_protein.R", encoding = "UTF-8")
 source("R/ui/ui_navbar.R", encoding = "UTF-8")         # Top glass navbar (METIS)
 source("R/ui/ui_home.R", encoding = "UTF-8")           # Home page and intro
 source("R/ui/ui_preprocess.R", encoding = "UTF-8")    # Data preprocessing tab
+source("R/ui/ui_quality.R", encoding = "UTF-8")      # Array quality control tab
 source("R/ui/ui_peptide.R", encoding = "UTF-8")       # Peptide analysis tab
 source("R/ui/ui_ml.R", encoding = "UTF-8")            # Machine Learning tab
 source("R/ui/ui_protein_viz.R", encoding = "UTF-8")   # Protein 2D/3D visualization tab
@@ -139,9 +141,6 @@ source("R/ui/ui_documentation.R", encoding = "UTF-8") # Documentation viewer tab
 
 # Ggiraph theme and interactive plot utilities
 source("Def/ggiraph_theme.R", encoding = "UTF-8")
-
-# Synthetic data generation for testing and demos
-source("Def/synthetic_data.R", encoding = "UTF-8")
 
 # Color palette definitions
 source("R/utils/colors.R", encoding = "UTF-8")
@@ -161,11 +160,21 @@ source("R/utils/radar_plot.R", encoding = "UTF-8")
 # UI helper functions (card containers, section titles, etc.)
 source("R/utils/ui_helpers.R", encoding = "UTF-8")
 
+# Staging of user-uploaded raw scans into a per-session directory
+source("R/utils/upload_staging.R", encoding = "UTF-8")
+
 # Protein visualization utilities
 source("R/utils/protein_utils.R", encoding = "UTF-8")
 
 # Snake plot utilities
 source("R/utils/snake_plot_utils.R", encoding = "UTF-8")
+
+# AlphaFold / PDBe structure lookup
+source("R/utils/structure_utils.R", encoding = "UTF-8")
+
+# Array quality control metrics and grading
+source("R/server/quality_control.R", encoding = "UTF-8")
+source("R/server/quality_server.R", encoding = "UTF-8")
 
 # =============================================================================
 # GLOBAL CONFIGURATION
@@ -178,9 +187,14 @@ custom_palette <- c(
   "#F39B7FFF", "#8491B4FF", "#91D1C2FF", "#DC0000FF"
 )
 
-# Maximum file upload size (100 MB)
-# Allows users to upload larger datasets
-options(shiny.maxRequestSize = 100 * 1024^2)
+# Maximum upload size. RAW mode uploads a whole scan set in one go (one CSV
+# per sample), so this has to cover the batch, not a single file. Deployments
+# can raise or lower it with MICROARRAI_MAX_UPLOAD_MB without editing code.
+max_upload_mb <- suppressWarnings(
+  as.numeric(Sys.getenv("MICROARRAI_MAX_UPLOAD_MB", unset = "1024"))
+)
+if (is.na(max_upload_mb) || max_upload_mb <= 0) max_upload_mb <- 1024
+options(shiny.maxRequestSize = max_upload_mb * 1024^2)
 
 # Disable scientific notation for better readability
 # Display full numbers instead of 1.23e+05 format

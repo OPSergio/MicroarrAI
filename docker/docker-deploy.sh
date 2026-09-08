@@ -9,6 +9,9 @@ set -e
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
+# docker compose resolves the ../data and ../logs mounts relative to the compose
+# file, not to the caller's cwd, so create them at the repo root explicitly.
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,7 +49,8 @@ else
     COMPOSE_CMD="docker compose -f $COMPOSE_FILE"
 fi
 
-mkdir -p logs
+# Bind-mount target for the logs volume in docker-compose.yml.
+mkdir -p "$REPO_ROOT/logs"
 
 echo ""
 echo "Select an option:"

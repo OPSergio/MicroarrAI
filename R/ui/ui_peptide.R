@@ -158,18 +158,18 @@ ui_peptide <- function() {
       fluidRow(
         column(
           4,
-          tags$h4("Positive Peptides by Isotype", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
+          tags$h4("Positive Peptides by Isotype", class = "mi-panel-title"),
           girafeOutput("isotype_donut", height = "300px"),
           tags$br(),
-          tags$h4("Isotype Summary Statistics", style = "color: #191c32; margin-bottom: 15px; margin-top: 20px; font-weight: bold;"),
+          tags$h4("Isotype Summary Statistics", class = "mi-panel-title"),
           DT::dataTableOutput("isotype_table")
         ),
         column(
           8,
-          tags$h4("Expression Distribution by Isotype", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
+          tags$h4("Expression Distribution by Isotype", class = "mi-panel-title"),
           girafeOutput("expression_dist_plot", height = "300px", width = "100%"),
           tags$br(),
-          tags$h4("Top Samples by Positive Peptides", style = "color: #191c32; margin-bottom: 15px; margin-top: 20px; font-weight: bold;"),
+          tags$h4("Top Samples by Positive Peptides", class = "mi-panel-title"),
           DT::dataTableOutput("top_samples_table", height = "300px", width = "100%")
         )
       )
@@ -319,7 +319,7 @@ ui_peptide <- function() {
             # Native D3 volcano (www/volcano_d3.js): recolours/relabels instantly
             tags$div(id = "volcano-d3", style = "width:100%; min-height:520px;"),
             br(),
-            tags$h4("Significant Features", style = "color: #191c32; margin: 20px 0 15px 0; font-weight: bold;"),
+            tags$h4("Significant Features", class = "mi-panel-title"),
             DT::DTOutput("volcano_hits_table")
           )
         )
@@ -336,7 +336,7 @@ ui_peptide <- function() {
         fluidRow(
           column(
             6,
-            tags$h4("Differential Expression Results", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
+            tags$h4("Differential Expression Results", class = "mi-panel-title"),
             withSpinner(DT::dataTableOutput("unified_stats_table"))
           ),
           column(
@@ -347,7 +347,7 @@ ui_peptide <- function() {
             ),
             tags$hr(style = "margin: 20px 0;"),
             tags$div(
-              tags$h4("ROC Curve", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
+              tags$h4("ROC Curve", class = "mi-panel-title"),
               withSpinner(plotOutput("rocs_plot", height = "350px"))
             )
           )
@@ -449,14 +449,14 @@ ui_peptide <- function() {
         fluidRow(
           column(
             6,
-            tags$h4("Selection Process Overview", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
+            tags$h4("Selection Process Overview", class = "mi-panel-title"),
             girafeOutput("results_donut", height = "350px")
           ),
           column(
             6,
             tags$div(
               style = "background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);",
-              tags$h4("Analysis Summary", style = "color: #191c32; margin-top: 0; margin-bottom: 15px; font-weight: bold;"),
+              tags$h4("Analysis Summary", class = "mi-panel-title"),
               uiOutput("results_summary_text")
             )
           )
@@ -491,7 +491,7 @@ ui_peptide <- function() {
         fluidRow(
           column(
             6,
-            tags$h4("Selection Method", style = "color: #191c32; margin-bottom: 20px; font-weight: bold;"),
+            tags$h4("Selection Method", class = "mi-panel-title"),
             radioButtons(
               "ml_selection_method", 
               dark_label("Select peptides by:"),

@@ -16,20 +16,22 @@ services:
     
     container_name: microarrai-app
     
-    # Port mapping: host:container
+    # Port mapping: host:container.
+    # Values come from docker/.env (copy docker/.env.example); the defaults after
+    # ":-" apply when that file is absent, so this works with no configuration.
     ports:
-      - "3838:3838"
-    
-    # Environment variables (optional)
+      - "${SHINY_PORT:-3838}:3838"
+
     environment:
-      - SHINY_LOG_LEVEL=INFO
-      # - R_MAX_MEMORY=4G  # Adjust based on server resources
+      - SHINY_LOG_LEVEL=${SHINY_LOG_LEVEL:-INFO}
+      # Ceiling for one RAW upload, i.e. a whole scan set at once (see R/global.R)
+      - MICROARRAI_MAX_UPLOAD_MB=${MICROARRAI_MAX_UPLOAD_MB:-1024}
     
     # Volumes for persistent data and logs
     volumes:
-      # Uncomment to persist uploaded data
-      # - ../data:/srv/shiny-server/MicroarrAI/data
-      
+      # No data volume on purpose: users upload their scans through the browser
+      # and the files live in the session tempdir, not on the host.
+
       # Persist logs
       - ../logs:/var/log/shiny-server
       
@@ -43,11 +45,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 8G
+          cpus: '${CPU_LIMIT:-4}'
+          memory: ${MEMORY_LIMIT:-8G}
         reservations:
-          cpus: '2'
-          memory: 4G
+          cpus: '${CPU_RESERVATION:-2}'
+          memory: ${MEMORY_RESERVATION:-4G}
     
     # Health check
     healthcheck:

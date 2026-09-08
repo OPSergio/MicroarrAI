@@ -13,8 +13,8 @@ source("R/global.R")
 ui <- fluidPage(
   # ===== Head: Metadata & External Resources =====
   tags$head(
-    tags$title("METIS"),
-    #tags$link(rel = "icon", type = "image/svg+xml", href = "landing/assets/metis-mark.svg"),
+    tags$title("MicroarrAI"),
+    tags$link(rel = "icon", type = "image/svg+xml", href = "assets/favicon.svg"),
     tags$link(rel = "preconnect", href = "https://fonts.googleapis.com"),
     tags$link(rel = "preconnect", href = "https://fonts.gstatic.com", crossorigin = NA),
     tags$link(
@@ -50,6 +50,7 @@ ui <- fluidPage(
     ui_preprocess(),
     ui_peptide(),
     ui_ml(),
+    ui_quality(),
     ui_protein_viz(),
     ui_documentation()
   
@@ -65,11 +66,18 @@ server <- function(input, output, session){
   })
 
   ########################### INDEX ###########################################
-  volumes <- getVolumes()()
-  shinyDirChoose(input, 'directory', roots=volumes, session=session)
+  # RAW scans are uploaded by the user, never read from the server: a folder
+  # browser would only expose the container's own filesystem, which holds no
+  # user data. The pipeline still wants a directory of CSVs whose file names
+  # are the sample IDs, so the upload is staged into a private per-session
+  # directory (see R/utils/upload_staging.R) and that is what path1() returns.
+  raw_upload_dir <- new_upload_dir()
+  session$onSessionEnded(function() unlink(raw_upload_dir, recursive = TRUE))
   
+  # Returns "" while nothing is uploaded, which every downstream req()/guard
+  # already treats as "no data yet".
   path1 <- reactive({
-    parseDirPath(volumes, input$directory)
+    stage_uploaded_files(input$raw_files, raw_upload_dir)
   })
   
   # Reset the whole pipeline from scratch (fresh session clears every reactiveVal
@@ -86,6 +94,8 @@ server <- function(input, output, session){
   metadata_render_trigger <- reactiveVal(0)
   pepdata <- reactiveVal(NULL)
   available_analytes <- reactiveVal(NULL)
+  qc_spot_data <- reactiveVal(NULL)      # spot-level data feeding Quality Control
+  norm_diagnostics <- reactiveVal(NULL)  # did normalization make arrays comparable?
   
   # ===== ACTIVE DATABASE: Returns edited version if exists, else original =====
   active_database <- reactive({
@@ -151,17 +161,16 @@ server <- function(input, output, session){
     if (is.null(path1()) || length(path1()) == 0 || path1() == "") {
       tags$div(
         style = "margin-top: 15px;",
-        tags$p(icon("folder"), " No folder selected", 
+        tags$p(icon("folder"), " No files uploaded yet",
               style = "color: #6c757d; font-style: italic;")
       )
     } else {
-      files <- list.files(path = path1(), pattern = "\\.csv$", full.names = TRUE)
+      files <- list.files(path = path1(), pattern = ARRAY_FILE_PATTERN, full.names = TRUE)
       tags$div(
         style = "margin-top: 15px; background: #d4edda; padding: 15px; border-radius: 8px; border-left: 4px solid #28a745;",
-        tags$h6(icon("check-circle"), " Folder Loaded Successfully!", 
+        tags$h6(icon("check-circle"), " Files Uploaded Successfully!",
                style = "color: #155724; margin-bottom: 10px;"),
-        tags$p(tags$b("Path:"), basename(path1()), style = "color: #155724; margin: 5px 0;"),
-        tags$p(tags$b("CSV files found:"), length(files), style = "color: #155724; margin: 5px 0;"),
+        tags$p(tags$b("Scan files read:"), length(files), style = "color: #155724; margin: 5px 0;"),
         tags$p(tags$b("Analytes detected:"), 
               if (!is.null(available_analytes())) length(available_analytes()) else "Processing...",
               style = "color: #155724; margin: 5px 0;")
@@ -196,12 +205,54 @@ output$normalization_method_description <- renderUI({
   }
   })
   
+  # ===== Channels present in the loaded folder =====
+  detected_channels <- reactive({
+    req(input$input_mode == "raw", path1())
+    files <- list.files(path = path1(), pattern = ARRAY_FILE_PATTERN, full.names = TRUE)
+    req(length(files) > 0)
+
+    header <- detect_array_header(files[1])
+    cols <- names(utils::read.delim(files[1], sep = header$sep, skip = header$skip,
+                                    check.names = FALSE, nrows = 1,
+                                    fileEncoding = "latin1"))
+    detect_array_channels(cols)$channel
+  })
+
+  channel_labels <- reactive({
+    channels <- detected_channels()
+    stats::setNames(
+      vapply(channels, function(ch) {
+        value <- input[[paste0("ch_label_", ch)]]
+        if (is.null(value) || !nzchar(value)) paste0("Ch", ch) else value
+      }, character(1)),
+      channels
+    )
+  })
+
+  output$channel_labels_ui <- renderUI({
+    channels <- detected_channels()
+    legacy <- c("IgE", "IgG4")
+
+    tagList(
+      tags$p(sprintf("%d channel%s detected in these files.",
+                     length(channels), if (length(channels) == 1) "" else "s"),
+             style = "color: #6c757d; font-size: 13px; margin-bottom: 12px;"),
+      lapply(seq_along(channels), function(i) {
+        textInput(
+          paste0("ch_label_", channels[i]),
+          dark_label(paste0("Channel ", channels[i], ":")),
+          value = if (i <= length(legacy) && length(channels) == 2) legacy[i] else paste0("Ch", channels[i])
+        )
+      })
+    )
+  })
+
   # ===== Analyte ID extraction from RAW files =====
   observeEvent(path1(), {
     req(input$input_mode == "raw")
     req(path1())
-    
-    files <- list.files(path = path1(), pattern = "\\.csv$", full.names = TRUE)
+
+    files <- list.files(path = path1(), pattern = ARRAY_FILE_PATTERN, full.names = TRUE)
     if (length(files) > 0) {
       # Show processing notification
       showNotification("Extracting analyte IDs from files...", type = "message", duration = 2)
@@ -464,14 +515,10 @@ output$normalization_method_description <- renderUI({
       return()
     }
     
-    files <- list.files(path = path1(), pattern = "\\.csv$", full.names = TRUE)
+    files <- list.files(path = path1(), pattern = ARRAY_FILE_PATTERN, full.names = TRUE)
     
     withProgress(message = 'Processing files...', value = 0, {
-      # Get channel labels
-      ch_labels <- list(
-        ch1 = if (nchar(input$ch1_label) > 0) input$ch1_label else "IgE",
-        ch2 = if (nchar(input$ch2_label) > 0) input$ch2_label else "IgG4"
-      )
+      ch_labels <- channel_labels()
       
       regex_pattern <- if(nchar(input$neg_ctrl_regex) > 0) input$neg_ctrl_regex else NULL
       
@@ -515,6 +562,8 @@ output$normalization_method_description <- renderUI({
         positive_controls = pos_controls,
         positive_controls_pattern = pos_regex_pattern,
         channel_labels = ch_labels,
+        spot_metric = if (is.null(input$spot_metric)) "ratio" else input$spot_metric,
+        return_qc = TRUE,
         progress_callback = function(i, total, name) {
           incProgress(1/total, detail = paste("Sample", name, "complete"))
         }
@@ -522,11 +571,12 @@ output$normalization_method_description <- renderUI({
       
 
       
+      qc_spot_data(data$qc)
+      data <- data$data
+
       # VALIDATE processed data before continuing
       validation <- validate_expression_matrix(data, min_samples = 1, min_features = 1)
-      
 
-      
       if (!validation$valid) {
         showNotification(
           paste("Processing failed:", validation$message),
@@ -536,16 +586,23 @@ output$normalization_method_description <- renderUI({
         return()
       }
       
-      # Apply inter-sample (between-array) normalization if enabled.
-      # Methods live in R/server/normalization.R and operate per-sample.
       if (input$enable_inter_norm) {
-        if (input$inter_norm_method == "quantile") {
-          showNotification("Quantile normalization harmonizes per-sample distributions.",
-                           type = "warning", duration = 5)
-        }
         data <- apply_inter_sample_normalization(data, method = input$inter_norm_method)
       }
-      
+
+      # Diagnostic against the RAW spot signal, not against the intermediate:
+      # the question is whether the whole normalization left arrays on a common
+      # scale, and dividing each array by its own control spread can undo that.
+      diagnostics <- normalization_diagnostics(raw_peptide_matrix(qc_spot_data()), data)
+      norm_diagnostics(diagnostics)
+
+      if (!diagnostics$improved) {
+        showNotification(
+          HTML(paste0("<strong>Check the normalization.</strong><br>", diagnostics$message)),
+          type = "warning", duration = 14
+        )
+      }
+
       processed_data(data)
       
       # Success notification
@@ -554,7 +611,7 @@ output$normalization_method_description <- renderUI({
           "<strong>Processing Complete!</strong><br>",
           "Samples: ", nrow(data), "<br>",
           "Features: ", ncol(data) - 1, "<br>",
-          "Channels: ", ch_labels$ch1, ", ", ch_labels$ch2
+          "Channels: ", paste(ch_labels, collapse = ", ")
         )),
         type = "message",
         duration = 8
@@ -563,25 +620,34 @@ output$normalization_method_description <- renderUI({
   })
   
   # ===== Validate processed matrix upload =====
-  observeEvent(input$pep_fileinput, {
+  observeEvent(
+    list(input$pep_fileinput, input$matrix_orientation,
+         input$matrix_normalized, input$matrix_norm_method), {
     req(input$input_mode == "processed")
     req(input$pep_fileinput)
-    
-    validation <- validate_processed_matrix(input$pep_fileinput$datapath)
-    
+
+    orientation <- input$matrix_orientation
+    if (is.null(orientation)) orientation <- "samples_in_rows"
+
+    validation <- validate_processed_matrix(input$pep_fileinput$datapath, orientation)
+
     output$matrix_validation_status <- renderText({
       validation$message
     })
-    
-    if (validation$valid) {
-      ext <- tools::file_ext(input$pep_fileinput$datapath)
-      if (ext %in% c("xlsx", "xls")) {
-        data <- readxl::read_excel(input$pep_fileinput$datapath)
-      } else {
-        data <- read.csv(input$pep_fileinput$datapath)
-      }
-      processed_data(data)
+
+    if (!validation$valid) return(NULL)
+
+    data <- read_processed_matrix(input$pep_fileinput$datapath, orientation)
+
+    if (identical(input$matrix_normalized, "no")) {
+      method <- input$matrix_norm_method
+      if (is.null(method)) method <- "quantile"
+      data <- apply_inter_sample_normalization(data, method = method)
+      showNotification(paste("Applied", method, "normalization to the uploaded matrix."),
+                       type = "message", duration = 5)
     }
+
+    processed_data(data)
   })
   
   # ===== Clinical Database Upload with Advanced Options =====
@@ -763,15 +829,15 @@ output$normalization_method_description <- renderUI({
       
       # Sheet 3: Processing log
       log_data <- data.frame(
-        Parameter = c("Processing Date", "Input Mode", "Normalization Method", 
-                     "Channel 1 Label", "Channel 2 Label", "Negative Controls", 
+        Parameter = c("Processing Date", "Input Mode", "Normalization Method",
+                     "Channel Labels", "Spot Signal", "Negative Controls",
                      "Inter-sample Normalization"),
         Value = c(
           as.character(Sys.Date()),
           if (!is.null(input$input_mode)) input$input_mode else "N/A",
           if (!is.null(input$normalization_method)) input$normalization_method else "N/A",
-          if (!is.null(input$ch1_label)) input$ch1_label else "IgE",
-          if (!is.null(input$ch2_label)) input$ch2_label else "IgG4",
+          paste(tryCatch(channel_labels(), error = function(e) "N/A"), collapse = ", "),
+          if (!is.null(input$spot_metric)) input$spot_metric else "ratio",
           if (!is.null(input$negative_controls)) paste(input$negative_controls, collapse = ", ") else "N/A",
           if (!is.null(input$enable_inter_norm) && input$enable_inter_norm) 
             input$inter_norm_method else "None"
@@ -1128,12 +1194,18 @@ output$normalization_method_description <- renderUI({
     req(peptide_summary())
     kpi_data <- create_summary_value_boxes(peptide_summary(), na_stats())
 
-    # PowerBI-style flat tiles, 4 per row; NA tile flagged amber
-    fluidRow(
-      lapply(1:nrow(kpi_data), function(i) {
-        accent <- if (kpi_data$Metric[i] == "Peptides with NA") "#e0a800" else "#17a589"
-        column(3, kpi_card(kpi_data$Metric[i], kpi_data$Value[i], accent))
-      })
+    # PowerBI-style flat tiles, 4 per row. Completeness moved to Quality Control.
+    tagList(
+      fluidRow(
+        lapply(seq_len(nrow(kpi_data)), function(i) {
+          column(3, kpi_card(kpi_data$Metric[i], kpi_data$Value[i], "#17a589"))
+        })
+      ),
+      tags$p(
+        style = "color:#6b7280;font-size:12.5px;margin-top:10px;",
+        icon("circle-info", style = "margin-right:6px;"),
+        "Missing values, replicate agreement and per-array quality live in the Quality Control tab."
+      )
     )
   })
   
@@ -1807,17 +1879,21 @@ output$normalization_method_description <- renderUI({
         padj = round(padj, 4),
         neglog10_padj = round(neglog10_padj, 4)
       )
+    # Significance is a yes/no call, so p and padj are shaded green when they
+    # clear the threshold and left plain when they do not. A bar length would
+    # only invite reading a magnitude into them.
+    thr <- if (is.null(input$volcano_padj_thr)) 0.05 else input$volcano_padj_thr
+
     DT::datatable(
       tb,
       options = list(pageLength = 10, scrollY = "350px"),
       rownames = FALSE
     ) %>%
       DT::formatStyle(
-        'padj',
-        background = DT::styleColorBar(c(0, max(tb$padj, na.rm = TRUE)), '#4facfe'),
-        backgroundSize = '95% 80%',
-        backgroundRepeat = 'no-repeat',
-        backgroundPosition = 'center'
+        c('p', 'padj'),
+        backgroundColor = DT::styleInterval(thr, c('#e3f4ef', '')),
+        color           = DT::styleInterval(thr, c('#0b4f44', '')),
+        fontWeight      = DT::styleInterval(thr, c('bold', 'normal'))
       )
   })
   
@@ -3493,7 +3569,9 @@ output$normalization_method_description <- renderUI({
     result <- tryCatch({
       c50_advanced_result()
     }, error = function(e) {
-      message("[variables_c5] Advanced result not available: ", e$message)
+      # An empty message is the pipeline simply not having run yet
+      # (req() inside the eventReactive), not a training failure.
+      if (nzchar(e$message)) message("[variables_c5] Training failed: ", e$message)
       NULL
     })
     
@@ -3583,7 +3661,9 @@ output$normalization_method_description <- renderUI({
     result <- tryCatch({
       rf_advanced_result()
     }, error = function(e) {
-      message("[variables_rf] Advanced result not available: ", e$message)
+      # An empty message is the pipeline simply not having run yet
+      # (req() inside the eventReactive), not a training failure.
+      if (nzchar(e$message)) message("[variables_rf] Training failed: ", e$message)
       NULL
     })
     
@@ -3664,7 +3744,9 @@ output$normalization_method_description <- renderUI({
     result <- tryCatch({
       svm_advanced_result()
     }, error = function(e) {
-      message("[variables_svm] Advanced result not available: ", e$message)
+      # An empty message is the pipeline simply not having run yet
+      # (req() inside the eventReactive), not a training failure.
+      if (nzchar(e$message)) message("[variables_svm] Training failed: ", e$message)
       NULL
     })
     
@@ -3827,7 +3909,9 @@ output$normalization_method_description <- renderUI({
     result <- tryCatch({
       xgboost_advanced_result()
     }, error = function(e) {
-      message("[variables_xgb] Advanced result not available: ", e$message)
+      # An empty message is the pipeline simply not having run yet
+      # (req() inside the eventReactive), not a training failure.
+      if (nzchar(e$message)) message("[variables_xgb] Training failed: ", e$message)
       NULL
     })
     
@@ -4398,87 +4482,36 @@ output$normalization_method_description <- renderUI({
   )
   
   #### End Protein Visualization ####
+
+  #### Quality Control ####
+
+  # The positive-control dilution series is what tells us the assay responded.
+  # Concentrations are read off the analyte name (e.g. "aIgE_0125" -> 0.125).
+  qc_positive_controls <- reactive({
+    spots <- qc_spot_data()
+    if (is.null(spots)) return(NULL)
+
+    series <- unique(spots$ID[grepl("^a\\.?IgE", spots$ID, ignore.case = TRUE)])
+    if (length(series) < 3) return(NULL)
+
+    digits <- sub("^[^0-9]*", "", series)
+    tibble::tibble(ID = series, dose = as.numeric(paste0("0.", digits))) %>%
+      dplyr::filter(is.finite(dose))
+  })
+
+  setup_quality_server(
+    input, output, session,
+    qc_spots = reactive({ qc_spot_data() }),
+    norm_diagnostics = reactive({ norm_diagnostics() }),
+    positive_controls = qc_positive_controls,
+    na_stats = reactive({ if (is.null(raw_pepdata())) NULL else na_stats() })
+  )
+
+  #### End Quality Control ####
   
   ########################### DOCUMENTATION ###################################
-  
-  # Reactive value to track selected documentation
-  selected_doc <- reactiveVal("index")
-  
-  # Observer for documentation selection
-  observeEvent(input$doc_selected, {
-    selected_doc(input$doc_selected)
-  })
-  
-  # Render documentation content
-  output$doc_content <- renderUI({
-    doc <- selected_doc()
-    
-    # Map doc IDs to file paths
-    doc_files <- list(
-      index = "docs/user_guide/00_index.md",
-      preprocessing = "docs/user_guide/01_preprocessing.md",
-      deg = "docs/user_guide/02_deg_analysis.md",
-      ml = "docs/user_guide/03_machine_learning.md"
-    )
-    
-    # Get the file path
-    file_path <- doc_files[[doc]]
-    
-    # Check if file exists
-    if (is.null(file_path) || !file.exists(file_path)) {
-      return(
-        tags$div(
-          style = "padding: 40px; text-align: center;",
-          tags$h3(
-            icon("exclamation-triangle"),
-            " Documentation Not Found",
-            style = "color: #856404;"
-          ),
-          tags$p(
-            paste("The requested documentation file could not be found:", file_path),
-            style = "color: #666;"
-          )
-        )
-      )
-    }
-    
-    # Read and render markdown
-    tryCatch({
-      # Read the markdown file
-      md_content <- readLines(file_path, warn = FALSE, encoding = "UTF-8")
-      md_text <- paste(md_content, collapse = "\n")
-      
-      # Convert markdown to HTML using markdown package
-      if (requireNamespace("markdown", quietly = TRUE)) {
-        html_content <- markdown::markdownToHTML(
-          text = md_text,
-          fragment.only = TRUE,
-          options = c("use_xhtml", "smartypants", "base64_images", "mathjax")
-        )
-        HTML(html_content)
-      } else {
-        # Fallback: display as preformatted text
-        tags$pre(
-          style = "white-space: pre-wrap; font-family: inherit;",
-          md_text
-        )
-      }
-    }, error = function(e) {
-      tags$div(
-        style = "padding: 40px; text-align: center;",
-        tags$h3(
-          icon("exclamation-circle"),
-          " Error Loading Documentation",
-          style = "color: #721c24;"
-        ),
-        tags$p(
-          paste("Error:", e$message),
-          style = "color: #666;"
-        )
-      )
-    })
-  })
-  
+  # The user guide is now fully static HTML in R/ui/ui_documentation.R — no
+  # server rendering required.
   #### End Documentation ####
   
 }

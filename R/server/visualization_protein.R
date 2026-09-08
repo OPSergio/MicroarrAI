@@ -33,12 +33,48 @@ server_protein_viz <- function(input, output, session,
   # REACTIVOS: Proteína seleccionada
   # ============================================================================
   
+  # ============================================================================
+  # Anotación de péptidos: el array se declara en un fichero, no se adivina
+  # ============================================================================
+
+  annotation <- reactive({
+    req(input$protein_annotation)
+
+    tryCatch(read_peptide_annotation(input$protein_annotation$datapath),
+             error = function(e) {
+               showNotification(paste("❌ Annotation file:", e$message),
+                                type = "error", duration = 10)
+               NULL
+             })
+  })
+
+  output$protein_selector <- renderUI({
+    ann <- annotation()
+    if (is.null(ann)) return(NULL)
+
+    selectInput("protein_name", HTML("<strong>Protein:</strong>"),
+                choices = sort(unique(ann$protein)))
+  })
+
+  # Everything downstream keys off these two: the tag that names the protein in
+  # the peptide columns, and the accession that fetches sequence and structure.
+  protein_tag <- reactive({
+    req(input$protein_name)
+    input$protein_name
+  })
+
+  protein_accession <- reactive({
+    ann <- annotation()
+    req(ann, input$protein_name)
+    unique(ann$accession[ann$protein == input$protein_name])[1]
+  })
+
   # Trigger para cargar proteína
   protein_trigger <- reactiveVal(0)
-  
+
   observeEvent(input$protein_load, {
-    req(input$protein_uniprot_id, input$protein_regex)
-    
+    req(annotation(), input$protein_name)
+
     # Validar que tenemos datos necesarios
     if (is.null(peptide_data) || is.null(peptide_data())) {
       showNotification(
@@ -58,19 +94,18 @@ server_protein_viz <- function(input, output, session,
       return()
     }
     
-    # Verificar que hay péptidos que coincidan con el regex
-    counts <- count_peptides(peptide_data(), input$protein_regex)
+    counts <- count_peptides(peptide_data(), protein_tag())
     if (counts$total == 0) {
       showNotification(
-        paste("⚠️ No peptides found matching regex:", input$protein_regex),
+        paste("⚠️ No peptide columns named after", protein_tag()),
         type = "warning",
         duration = 5
       )
       return()
     }
-    
+
     showNotification(
-      paste("🔍 Loading protein", input$protein_uniprot_id, "..."),
+      paste("🔍 Loading protein", protein_tag(), "..."),
       type = "message",
       duration = 2
     )
@@ -92,30 +127,26 @@ server_protein_viz <- function(input, output, session,
   
   protein_info_data <- reactive({
     req(protein_trigger() > 0)        # only after the user clicks "Load"
-    req(input$protein_uniprot_id)
+    req(annotation(), input$protein_name)
 
     isolate({
-      uniprot_id <- input$protein_uniprot_id
-      message("[PROTEIN_INFO] Fetching data for: ", uniprot_id)
-      
-      # Need a plausible accession before fetching (silent: no scary disclaimer)
-      req(nchar(uniprot_id) >= 6)
+      message("[PROTEIN_INFO] Building ", input$protein_name, " from the annotation file")
 
       tryCatch({
-        protein_info <- get_protein_info(uniprot_id, peptide_length = 20, offset = 3)
-        
+        protein_info <- protein_info_from_annotation(annotation(), input$protein_name)
+
         showNotification(
           paste("✅ Proteína cargada:", nrow(protein_info$uniprot_info), "AA,",
-                max(protein_info$Structure_info$Number, na.rm = TRUE), "péptidos"),
-          type = "message", 
+                dplyr::n_distinct(protein_info$Structure_info$Number), "péptidos"),
+          type = "message",
           duration = 3
         )
-        
+
         protein_info
       }, error = function(e) {
         showNotification(
-          paste("❌ Error al cargar proteína:", e$message), 
-          type = "error", 
+          paste("❌ Error al cargar proteína:", e$message),
+          type = "error",
           duration = 7
         )
         NULL
@@ -128,9 +159,8 @@ server_protein_viz <- function(input, output, session,
   # ============================================================================
   
   output$protein_peptide_count <- renderUI({
-    # Solo requiere datos de peptides y regex, NO necesita protein_info_data()
-    req(input$protein_regex)
-    
+    req(protein_tag())
+
     # Validar que hay datos de péptidos disponibles
     if (is.null(peptide_data) || is.null(peptide_data())) {
       return(
@@ -145,13 +175,20 @@ server_protein_viz <- function(input, output, session,
       )
     }
     
-    counts <- count_peptides(peptide_data(), input$protein_regex)
-    
+    counts <- count_peptides(peptide_data(), protein_tag())
+    annotated <- sum(annotation()$protein == protein_tag())
+
+    # Columns cover every isotype, so the honest denominator is annotated
+    # peptides x isotypes present.
+    isotypes <- max(1, length(discover_isotypes(names(peptide_data()))))
+
     tags$div(
       style = "background: #e3f2fd; padding: 15px; border-radius: 5px; border-left: 4px solid #2196F3;",
-      tags$strong(style = "color: #1976D2; font-size: 16px;", "Peptides identified:"),
-      tags$span(style = "margin-left: 10px; font-size: 18px; font-weight: bold; color: #0D47A1;", 
-                paste(counts$total, "péptidos encontrados"))
+      tags$strong(style = "color: #1976D2; font-size: 15px;", "Peptides matched:"),
+      tags$span(style = "margin-left: 10px; font-size: 18px; font-weight: bold; color: #0D47A1;",
+                counts$total),
+      tags$div(style = "font-size: 12px; color: #1976D2; margin-top: 4px;",
+               sprintf("%d annotated x %d isotype(s)", annotated, isotypes))
     )
   })
   
@@ -161,10 +198,10 @@ server_protein_viz <- function(input, output, session,
   
   # MANTENER expression_data() para compatibilidad (procesa TODO - IgE + IgG4)
   expression_data <- reactive({
-    req(protein_info_data(), input$protein_regex)
-    
-    regex <- input$protein_regex
-    
+    req(protein_info_data(), protein_tag())
+
+    protein <- protein_tag()
+
     # Si no hay datos externos, retornar NULL
     if (is.null(peptide_data) || is.null(clinical_data)) {
       return(NULL)
@@ -175,7 +212,7 @@ server_protein_viz <- function(input, output, session,
     target <- target_var()
     
     # Contar péptidos
-    counts <- count_peptides(peptides, regex)
+    counts <- count_peptides(peptides, protein)
     
     if (counts$total == 0) {
       return(NULL)
@@ -252,13 +289,12 @@ server_protein_viz <- function(input, output, session,
             
             message("[BIOMARKER_MATCH] Unique protein IDs: ", paste(unique(result$protein_id), collapse = ", "))
             message("[BIOMARKER_MATCH] Unique antibody types: ", paste(unique(result$antibody_type), collapse = ", "))
-            message("[BIOMARKER_MATCH] Current regex filter: '", regex, "'")
-            
-            # Filtrar por regex
+            message("[BIOMARKER_MATCH] Protein filter: ", protein)
+
             filtered_result <- result %>%
-              dplyr::filter(grepl(regex, protein_id, ignore.case = TRUE))
+              dplyr::filter(grepl(comparable_name(protein), comparable_name(protein_id), fixed = TRUE))
             
-            message("[BIOMARKER_MATCH] After regex filter: ", nrow(filtered_result), " biomarkers matched")
+            message("[BIOMARKER_MATCH] After protein filter: ", nrow(filtered_result), " biomarkers matched")
             
             if (nrow(filtered_result) > 0) {
               # MANTENER antibody_type para separación IgE/IgG4
@@ -275,7 +311,7 @@ server_protein_viz <- function(input, output, session,
               message("[BIOMARKER_MATCH] IgG4 biomarkers: ", sum(result$antibody_type == "IgG4"))
               result
             } else {
-              message("[BIOMARKER_MATCH] ⚠️ WARNING: No biomarkers matched the regex!")
+              message("[BIOMARKER_MATCH] ⚠️ WARNING: No biomarkers matched the protein!")
               tibble::tibble(Number = integer(), antibody_type = character(), 
                             is_biomarker = logical(), biomarker_id = character())
             }
@@ -326,209 +362,76 @@ server_protein_viz <- function(input, output, session,
 
   
   # ============================================================================
-  # REACTIVOS: Datos SEPARADOS por analito (IgE e IgG4)
+  # REACTIVOS: un analito cualquiera, descubierto del dato
   # ============================================================================
-  
-  # Expression data para IgE SOLAMENTE
-  expression_data_ige <- reactive({
-    req(protein_info_data(), input$protein_regex)
-    
-    regex <- input$protein_regex
-    
-    if (is.null(peptide_data) || is.null(clinical_data)) {
-      return(NULL)
-    }
-    
+
+  # Isotype prefixes present in the peptide columns. Nothing is hardcoded: a
+  # dataset with IgG only, or IgG + IgM, works the same as IgE + IgG4.
+  protein_isotypes <- reactive({
+    req(peptide_data())
+    found <- discover_isotypes(names(peptide_data()))
+    if (length(found) == 0) "Signal" else found
+  })
+
+  expression_for_isotype <- function(iso) {
+    req(protein_info_data(), protein_tag())
+    if (is.null(peptide_data) || is.null(clinical_data)) return(NULL)
+
+    protein <- protein_tag()
     peptides <- peptide_data()
     clinics <- clinical_data()
     target <- target_var()
-    
-    # Filtrar SOLO columnas IgE
-    message("\n[EXPRESSION_IgE] Filtering IgE peptides...")
-    ige_cols <- names(peptides)[grepl("^IgE_", names(peptides)) & grepl(regex, names(peptides), ignore.case = TRUE)]
-    
-    if (length(ige_cols) == 0) {
-      message("[EXPRESSION_IgE] No IgE peptides found for regex: ", regex)
-      return(NULL)
-    }
-    
-    message("[EXPRESSION_IgE] Found ", length(ige_cols), " IgE peptides")
-    
-    # Calcular medias por grupo
+
+    iso_cols <- names(peptides)[
+      grepl(paste0("^", iso, "_"), names(peptides)) &
+      grepl(comparable_name(protein), comparable_name(names(peptides)), fixed = TRUE)
+    ]
+    if (length(iso_cols) == 0) return(NULL)
+
     peptide_means <- peptides %>%
-      dplyr::select(id, dplyr::all_of(ige_cols)) %>%
+      dplyr::select(id, dplyr::all_of(iso_cols)) %>%
       dplyr::inner_join(clinics %>% dplyr::select(id, dplyr::all_of(target)), by = "id") %>%
       dplyr::group_by(!!rlang::sym(target)) %>%
-      dplyr::summarise(
-        dplyr::across(dplyr::all_of(ige_cols), ~mean(.x, na.rm = TRUE)),
-        .groups = "drop"
-      ) %>%
-      tidyr::pivot_longer(
-        cols = -dplyr::all_of(target),
-        names_to = "peptide",
-        values_to = "expr_mean"
-      ) %>%
-      dplyr::mutate(Number = as.integer(stringr::str_match(peptide, "_p[ _.-]?(\\d+)_")[,2])) %>%
+      dplyr::summarise(dplyr::across(dplyr::all_of(iso_cols), ~mean(.x, na.rm = TRUE)),
+                       .groups = "drop") %>%
+      tidyr::pivot_longer(cols = -dplyr::all_of(target),
+                          names_to = "peptide", values_to = "expr_mean") %>%
+      dplyr::mutate(Number = as.integer(stringr::str_match(peptide, "_p[ _.-]?(\\d+)_")[, 2])) %>%
       dplyr::filter(!is.na(Number))
 
-    if (nrow(peptide_means) == 0) {
-      message("[EXPRESSION_IgE] No positional peptides (e.g. _p11_ / _p_11_) matched; nothing to map.")
-      return(NULL)
-    }
+    if (nrow(peptide_means) == 0) return(NULL)
 
     colnames(peptide_means)[colnames(peptide_means) == target] <- "group"
 
-    # Filtrar biomarcadores IgE
     biomarkers_tbl <- if (!is.null(biomarkers) && !is.null(biomarkers())) {
-      expression_data()$biomarkers_tbl %>%
-        dplyr::filter(antibody_type == "IgE")
+      expression_data()$biomarkers_tbl %>% dplyr::filter(antibody_type == iso)
     } else {
-      tibble::tibble(Number = integer(), antibody_type = character(), 
-                    is_biomarker = logical(), biomarker_id = character())
+      tibble::tibble(Number = integer(), antibody_type = character(),
+                     is_biomarker = logical(), biomarker_id = character())
     }
-    
-    message("[EXPRESSION_IgE] IgE biomarkers: ", nrow(biomarkers_tbl))
-    
+
     peptide_means <- peptide_means %>%
       dplyr::left_join(biomarkers_tbl, by = "Number") %>%
       dplyr::mutate(
-        is_biomarker = ifelse(is.na(is_biomarker), FALSE, TRUE),
+        is_biomarker = !is.na(is_biomarker),
         biomarker_id = ifelse(is.na(biomarker_id), NA_character_, biomarker_id),
-        antibody_type = "IgE"
+        antibody_type = iso
       )
-    
-    list(
-      peptide_means = peptide_means,
-      biomarkers_tbl = biomarkers_tbl
-    )
-  })
-  
-  # Expression data para IgG4 SOLAMENTE
-  expression_data_igg4 <- reactive({
-    req(protein_info_data(), input$protein_regex)
-    
-    regex <- input$protein_regex
-    
-    if (is.null(peptide_data) || is.null(clinical_data)) {
-      return(NULL)
-    }
-    
-    peptides <- peptide_data()
-    clinics <- clinical_data()
-    target <- target_var()
-    
-    # Filtrar SOLO columnas IgG4
-    message("\n[EXPRESSION_IgG4] Filtering IgG4 peptides...")
-    igg4_cols <- names(peptides)[grepl("^IgG4_", names(peptides)) & grepl(regex, names(peptides), ignore.case = TRUE)]
-    
-    if (length(igg4_cols) == 0) {
-      message("[EXPRESSION_IgG4] No IgG4 peptides found for regex: ", regex)
-      return(NULL)
-    }
-    
-    message("[EXPRESSION_IgG4] Found ", length(igg4_cols), " IgG4 peptides")
-    
-    # Calcular medias por grupo
-    peptide_means <- peptides %>%
-      dplyr::select(id, dplyr::all_of(igg4_cols)) %>%
-      dplyr::inner_join(clinics %>% dplyr::select(id, dplyr::all_of(target)), by = "id") %>%
-      dplyr::group_by(!!rlang::sym(target)) %>%
-      dplyr::summarise(
-        dplyr::across(dplyr::all_of(igg4_cols), ~mean(.x, na.rm = TRUE)),
-        .groups = "drop"
-      ) %>%
-      tidyr::pivot_longer(
-        cols = -dplyr::all_of(target),
-        names_to = "peptide",
-        values_to = "expr_mean"
-      ) %>%
-      dplyr::mutate(Number = as.integer(stringr::str_match(peptide, "_p[ _.-]?(\\d+)_")[,2])) %>%
-      dplyr::filter(!is.na(Number))
 
-    if (nrow(peptide_means) == 0) {
-      message("[EXPRESSION_IgG4] No positional peptides (e.g. _p11_ / _p_11_) matched; nothing to map.")
-      return(NULL)
-    }
+    list(peptide_means = peptide_means, biomarkers_tbl = biomarkers_tbl)
+  }
 
-    colnames(peptide_means)[colnames(peptide_means) == target] <- "group"
+  aa_data_for_isotype <- function(iso) {
+    info <- protein_info_data()
+    expression <- expression_for_isotype(iso)
+    if (is.null(expression)) return(NULL)
 
-    # Filtrar biomarcadores IgG4
-    biomarkers_tbl <- if (!is.null(biomarkers) && !is.null(biomarkers())) {
-      expression_data()$biomarkers_tbl %>%
-        dplyr::filter(antibody_type == "IgG4")
-    } else {
-      tibble::tibble(Number = integer(), antibody_type = character(), 
-                    is_biomarker = logical(), biomarker_id = character())
-    }
-    
-    message("[EXPRESSION_IgG4] IgG4 biomarkers: ", nrow(biomarkers_tbl))
-    
-    peptide_means <- peptide_means %>%
-      dplyr::left_join(biomarkers_tbl, by = "Number") %>%
-      dplyr::mutate(
-        is_biomarker = ifelse(is.na(is_biomarker), FALSE, TRUE),
-        biomarker_id = ifelse(is.na(biomarker_id), NA_character_, biomarker_id),
-        antibody_type = "IgG4"
-      )
-    
-    list(
-      peptide_means = peptide_means,
-      biomarkers_tbl = biomarkers_tbl
+    prepare_snake_data(
+      info$Structure_info, expression$peptide_means,
+      info$signal_length, info$uniprot_info, 17, 2, 1
     )
-  })
-  
-  # ============================================================================
-  # REACTIVOS: AA_data separados por analito
-  # ============================================================================
-  
-  AA_data_ige <- reactive({
-    req(protein_info_data(), expression_data_ige())
-    
-    message("\n[AA_DATA_IgE] Preparing IgE snake plot data...")
-    Structure_info <- protein_info_data()$Structure_info
-    peptide_means <- expression_data_ige()$peptide_means
-    signal_length <- protein_info_data()$signal_length
-    uniprot_info <- protein_info_data()$uniprot_info
-    
-    message("[AA_DATA_IgE] Structure_info rows: ", nrow(Structure_info))
-    message("[AA_DATA_IgE] peptide_means rows: ", nrow(peptide_means))
-    message("[AA_DATA_IgE] IgE biomarkers: ", sum(peptide_means$is_biomarker, na.rm = TRUE))
-    
-    result <- prepare_snake_data(
-      Structure_info, peptide_means, signal_length, uniprot_info, 17, 2, 1
-    )
-    
-    message("[AA_DATA_IgE] ✓ IgE snake data prepared:")
-    message("  - Protein_plot rows: ", nrow(result$Protein_plot))
-    message("  - Biomarker_plot rows: ", nrow(result$Biomarker_plot))
-    
-    result
-  })
-  
-  AA_data_igg4 <- reactive({
-    req(protein_info_data(), expression_data_igg4())
-    
-    message("\n[AA_DATA_IgG4] Preparing IgG4 snake plot data...")
-    Structure_info <- protein_info_data()$Structure_info
-    peptide_means <- expression_data_igg4()$peptide_means
-    signal_length <- protein_info_data()$signal_length
-    uniprot_info <- protein_info_data()$uniprot_info
-    
-    message("[AA_DATA_IgG4] Structure_info rows: ", nrow(Structure_info))
-    message("[AA_DATA_IgG4] peptide_means rows: ", nrow(peptide_means))
-    message("[AA_DATA_IgG4] IgG4 biomarkers: ", sum(peptide_means$is_biomarker, na.rm = TRUE))
-    
-    result <- prepare_snake_data(
-      Structure_info, peptide_means, signal_length, uniprot_info, 17, 2, 1
-    )
-    
-    message("[AA_DATA_IgG4] ✓ IgG4 snake data prepared:")
-    message("  - Protein_plot rows: ", nrow(result$Protein_plot))
-    message("  - Biomarker_plot rows: ", nrow(result$Biomarker_plot))
-    
-    result
-  })
-  
+  }
+
   # ============================================================================
   # REACTIVOS: Datos completos LEGACY (mantener para compatibilidad)
   # ============================================================================
@@ -603,8 +506,9 @@ server_protein_viz <- function(input, output, session,
 
   # Per-(isotype, group, position) dataset, reusing the snake summaries
   protein_dataset <- reactive({
-    req(AA_data_ige(), AA_data_igg4())
+    req(protein_info_data())
     to_rows <- function(d, iso) {
+      if (is.null(d)) return(NULL)
       s <- d$AA_expression_summary
       data.frame(
         pos = s$Pos, aa = s$AA_Pep, isotype = iso, group = s$group,
@@ -614,11 +518,46 @@ server_protein_viz <- function(input, output, session,
         stringsAsFactors = FALSE
       )
     }
-    rbind(to_rows(AA_data_ige(), "IgE"), to_rows(AA_data_igg4(), "IgG4"))
+    rows <- lapply(protein_isotypes(), function(iso) to_rows(aa_data_for_isotype(iso), iso))
+    rows <- Filter(Negate(is.null), rows)
+    req(length(rows) > 0)
+    do.call(rbind, rows)
+  })
+
+  # Which structure to draw, decided server-side once per protein
+  protein_structure <- reactive({
+    req(protein_accession(), protein_info_data())
+    resolve_structure(protein_accession(), nrow(protein_info_data()$uniprot_info))
+  })
+
+  output$protein_structure_note <- renderUI({
+    s <- protein_structure()
+    if (s$source == "alphafold") return(NULL)
+
+    tags$div(
+      class = "pv-structure-note",
+      tags$b(if (s$source == "pdb") "Experimental structure: " else "2D only: "),
+      paste0(s$reason, ". "), s$detail
+    )
+  })
+
+  output$protein_isotype_ui <- renderUI({
+    isotypes <- protein_isotypes()
+    radioButtons("protein_isotype", "Isotype", choices = isotypes,
+                 selected = isotypes[1], inline = TRUE)
+  })
+
+  output$protein_color_mode_ui <- renderUI({
+    isotypes <- protein_isotypes()
+    modes <- c("Expression" = "expr", "Δ groups" = "dgroup")
+    if (length(isotypes) >= 2) {
+      modes[paste(isotypes[1], "−", isotypes[2])] <- "diso"
+    }
+    radioButtons("protein_color_mode", "Colour by", choices = modes, selected = "expr")
   })
 
   view <- function() list(
-    isotype = isolate(input$protein_isotype) %||% "IgE",
+    isotype = isolate(input$protein_isotype) %||% protein_isotypes()[1],
     group   = isolate(input$protein_group) %||% protein_groups()[1],
     mode    = isolate(input$protein_color_mode) %||% "expr",
     fdr     = isolate(input$protein_fdr) %||% 0.05,
@@ -628,10 +567,12 @@ server_protein_viz <- function(input, output, session,
 
   send_all <- function() {
     info <- isolate(protein_info_data())
+    structure <- isolate(protein_structure())
     session$sendCustomMessage("loadProtein", list(
-      uniprot = isolate(input$protein_uniprot_id), chain = "A",
+      uniprot = isolate(protein_accession()),
+      structureUrl = structure$url, pdb = structure$pdb_id, chain = structure$chain,
       signalLength = info$signal_length, disulfides = info$disulfides %||% list(),
-      isotypes = list("IgE", "IgG4"), groups = as.list(protein_groups()),
+      isotypes = as.list(protein_isotypes()), groups = as.list(protein_groups()),
       data = rows_list(protein_dataset()), view = view()
     ))
   }
@@ -646,7 +587,7 @@ server_protein_viz <- function(input, output, session,
   observeEvent(input$protein_biomarkers, push_view(), ignoreInit = TRUE)
 
   output$protein_export <- downloadHandler(
-    filename = function() paste0("biomarkers_", isolate(input$protein_isotype) %||% "IgE", ".fasta"),
+    filename = function() paste0("biomarkers_", isolate(input$protein_isotype) %||% protein_isotypes()[1], ".fasta"),
     content = function(file) {
       df <- protein_dataset(); v <- view()
       bm <- df[df$isotype == v$isotype & df$group == v$group & df$is_biomarker & !df$is_signal, ]
@@ -654,7 +595,7 @@ server_protein_viz <- function(input, output, session,
       if (nrow(bm) == 0) { writeLines("; no biomarkers selected", file); return() }
       brk <- c(0, cumsum(diff(bm$pos) != 1))               # contiguous stretches
       lines <- unlist(lapply(split(bm, brk), function(r) c(
-        sprintf(">%s_%d-%d isotype=%s", isolate(input$protein_uniprot_id), min(r$pos), max(r$pos), v$isotype),
+        sprintf(">%s_%d-%d isotype=%s", isolate(protein_tag()), min(r$pos), max(r$pos), v$isotype),
         paste(r$aa, collapse = ""))))
       writeLines(lines, file)
     }

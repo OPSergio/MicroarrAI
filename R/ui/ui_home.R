@@ -14,7 +14,7 @@ ui_home <- function() {
       tags$iframe(
         src = "landing/index.html",
         class = "metis-home__frame",
-        title = "METIS",
+        title = "MicroarrAI",
         frameborder = "0",
         scrolling = "yes",
         onload = "metisSyncTheme(this)"   # match current app theme on load

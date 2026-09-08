@@ -6,37 +6,78 @@
 # Documentation: docs/data_processing.md
 # ============================================================================
 
-#' Detect GenePix Header Row
-#' 
-#' Automatically finds the header row in GenePix CSV files
+#' Array file extensions the reader accepts
+ARRAY_FILE_PATTERN <- "\\.(csv|txt|gpr)$"
+
+
+#' Locate Header Row and Field Separator
 #'
-#' @param file_path Character. Full path to CSV file
-#' @return Integer. Row number where header starts (0-indexed for skip parameter)
+#' @param file_path Character. Full path to the array file
+#' @return List with `skip` (rows to skip) and `sep` (field separator)
 #' @details
-#' Locates the column-header row by finding the first line whose
-#' comma-separated fields contain an exact "ID" column. This works for both
-#' GenePix (.gpr-style) exports and PerkinElmer ScanArray Express CSV files,
-#' which place the column header right after a "BEGIN DATA" marker.
-detect_genepix_header <- function(file_path) {
+#' ATF files (GenePix .gpr / .txt exports) declare their own header length on
+#' line 2, so there is nothing to guess. Otherwise the header is the first row
+#' containing an exact "ID" field, tried as comma- then tab-separated.
+detect_array_header <- function(file_path) {
   lines <- readLines(file_path, n = 200, warn = FALSE, encoding = "latin1")
 
-  # Find the row whose fields include an exact "ID" column header
-  has_id_col <- vapply(lines, function(line) {
-    fields <- trimws(strsplit(line, ",", fixed = TRUE)[[1]])
-    "ID" %in% fields
-  }, logical(1))
-  header_row <- which(has_id_col)[1]
-
-  if (is.na(header_row)) {
-    # Fallback: GenePix files use a "Block" column header
-    header_row <- which(grepl("Block", lines, ignore.case = TRUE))[1]
+  if (length(lines) >= 2 && startsWith(lines[1], "ATF")) {
+    declared <- suppressWarnings(as.integer(strsplit(lines[2], "\t")[[1]][1]))
+    if (!is.na(declared)) {
+      return(list(skip = declared + 2, sep = "\t"))
+    }
   }
 
-  if (is.na(header_row)) {
-    warning("Could not detect microarray header. Using default skip=60")
-    return(60)
+  for (sep in c(",", "\t")) {
+    has_id <- vapply(lines, function(line) {
+      "ID" %in% trimws(gsub('"', '', strsplit(line, sep, fixed = TRUE)[[1]]))
+    }, logical(1))
+    header_row <- which(has_id)[1]
+    if (!is.na(header_row)) {
+      return(list(skip = header_row - 1, sep = sep))
+    }
   }
-  return(header_row - 1)  # Return skip value
+
+  stop("Could not locate the header row: no exact 'ID' column in the first 200 lines.")
+}
+
+
+#' Detect Signal/Background Column Pairs
+#'
+#' @param cols Character vector. Column names of the array file
+#' @return Tibble with one row per channel: `channel`, `fg`, `bg`
+#' @details
+#' Handles both naming conventions seen in the wild: `Ch1.Median` +
+#' `Ch1.B.Median` (ScanArray) and `F635 Median` + `B635 Median` (GenePix,
+#' named by wavelength). The channel token is kept as the internal id so a
+#' single-channel array works without special-casing.
+detect_array_channels <- function(cols) {
+  # ScanArray exports carry latin1 characters in some headers ("Ch2 Rgn R²"),
+  # which break regex matching unless compared byte-wise.
+  flat <- gsub("[ .]", "", cols, useBytes = TRUE)
+
+  tokens <- c(
+    sub("^Ch([0-9]+)Median$", "\\1", grep("^Ch[0-9]+Median$", flat, value = TRUE)),
+    sub("^F([0-9]+)Median$", "\\1", grep("^F[0-9]+Median$", flat, value = TRUE))
+  )
+  tokens <- sort(unique(tokens))
+
+  found <- lapply(tokens, function(n) {
+    fg <- cols[flat %in% c(paste0("Ch", n, "Median"), paste0("F", n, "Median"))]
+    bg <- cols[flat %in% c(paste0("Ch", n, "BMedian"), paste0("B", n, "Median"))]
+    if (length(fg) == 0 || length(bg) == 0) return(NULL)
+    tibble::tibble(channel = n, fg = fg[1], bg = bg[1])
+  })
+
+  channels <- dplyr::bind_rows(found)
+
+  if (nrow(channels) == 0) {
+    stop("No signal/background column pair found. Expected 'Ch1.Median' + 'Ch1.B.Median' ",
+         "or 'F635 Median' + 'B635 Median'. Found: ",
+         paste(utils::head(cols, 12), collapse = ", "))
+  }
+
+  channels
 }
 
 
@@ -71,52 +112,94 @@ clean_analyte_ids <- function(ids) {
 
 
 #' Read and Process Single Microarray File
-#' 
-#' Reads a CSV file from GenePix scanner, filters by quality flags,
-#' and calculates log2 expression ratios for both channels
 #'
-#' @param file_path Character. Full path to CSV file
+#' @param file_path Character. Full path to the array file (.csv, .txt, .gpr)
 #' @param flag_threshold Integer. Maximum flag value to keep (default: 4)
-#' @param auto_detect_header Logical. Auto-detect header row (default: TRUE)
-#' @param skip_rows Integer. Number of rows to skip if auto_detect=FALSE (default: 60)
-#' @return Tibble with columns: ID (cleaned), Expression_Ch1, Expression_Ch2
-#' @details 
-#' - Auto-detects GenePix header row
-#' - Filters spots with Flags >= flag_threshold
-#' - Cleans analyte IDs
-#' - Calculates Expression_Ch1 = log2(Ch1.Median / Ch1.B.Median)
-#' - Calculates Expression_Ch2 = log2(Ch2.Median / Ch2.B.Median)
+#' @param spot_metric Character. "ratio" for log2(signal/background) or
+#'   "difference" for background-corrected foreground
+#' @return Tibble in long format: ID (cleaned), channel, Expression
+#' @details
+#' Works with any number of channels. The returned `channel` column holds the
+#' token detected in the file ("1", "2", "635"), which the batch step maps to
+#' a user-facing label.
 #' @examples
 #' df <- read_microarray_file("sample001.csv")
 read_microarray_file <- function(file_path,
                                  flag_threshold = 4,
-                                 auto_detect_header = TRUE,
-                                 skip_rows = 60) {
-  
-  # Detect header if requested
-  if (auto_detect_header) {
-    skip_rows <- detect_genepix_header(file_path)
+                                 spot_metric = c("ratio", "difference"),
+                                 with_quality = FALSE) {
+
+  spot_metric <- match.arg(spot_metric)
+  header <- detect_array_header(file_path)
+
+  df <- utils::read.delim(file_path, sep = header$sep, skip = header$skip,
+                          check.names = FALSE, stringsAsFactors = FALSE,
+                          fileEncoding = "latin1")
+
+  channels <- detect_array_channels(names(df))
+
+  if ("Flags" %in% names(df)) {
+    df <- df[as.numeric(df$Flags) < flag_threshold, , drop = FALSE]
   }
-  
-  # Read and process file
-  df <- read.csv(file_path, skip = skip_rows, fileEncoding = 'latin1') %>%
-    dplyr::select(
-      ID,
-      Flags,
-      matches("^Ch1\\.Median$"),
-      matches("^Ch1\\.B\\.Median$"),
-      matches("^Ch2\\.Median$"),
-      matches("^Ch2\\.B\\.Median$")
-    ) %>%
-    dplyr::filter(Flags < flag_threshold) %>%
-    dplyr::mutate(
-      ID = clean_analyte_ids(ID),
-      Expression_Ch1 = log2(as.numeric(Ch1.Median) / as.numeric(Ch1.B.Median)),
-      Expression_Ch2 = log2(as.numeric(Ch2.Median) / as.numeric(Ch2.B.Median))
-    ) %>%
-    dplyr::select(ID, Expression_Ch1, Expression_Ch2)
-  
-  return(df)
+
+  ids <- clean_analyte_ids(df[["ID"]])
+  optional <- function(name) if (name %in% names(df)) suppressWarnings(as.numeric(df[[name]])) else NA_real_
+
+  per_channel <- lapply(seq_len(nrow(channels)), function(i) {
+    fg <- as.numeric(df[[channels$fg[i]]])
+    bg <- as.numeric(df[[channels$bg[i]]])
+
+    spot <- tibble::tibble(
+      ID = ids,
+      channel = channels$channel[i],
+      Expression = if (spot_metric == "ratio") log2(fg / bg) else fg - bg
+    )
+
+    if (!with_quality) return(spot)
+
+    # Quality columns the scanner already computes; richer than the flag alone
+    # and what the QC tab needs to spot dust, gradients and saturation.
+    snr_col <- grep(paste0("^(Ch)?", channels$channel[i], ".*(SignalNoiseRatio|SNR)"),
+                    names(df), value = TRUE)
+    sat_col <- grep(paste0("^(Ch)?", channels$channel[i], ".*Sat"),
+                    names(df), value = TRUE)
+
+    dplyr::mutate(spot,
+      signal    = fg,
+      background = bg,
+      x         = optional("X"),
+      y         = optional("Y"),
+      flag      = optional("Flags"),
+      footprint = optional("Footprint"),
+      snr       = if (length(snr_col)) suppressWarnings(as.numeric(df[[snr_col[1]]])) else NA_real_,
+      saturation = if (length(sat_col)) suppressWarnings(as.numeric(df[[sat_col[1]]])) else NA_real_
+    )
+  })
+
+  dplyr::bind_rows(per_channel)
+}
+
+
+#' Map Detected Channels to User-Facing Labels
+#'
+#' @param channels Character vector. Channel tokens found in the file
+#' @param labels List or named vector. User labels, named either by token
+#'   ("1", "635") or with the legacy `ch1`/`ch2` form
+#' @return Named character vector: token -> label
+resolve_channel_labels <- function(channels, labels = NULL) {
+  resolved <- stats::setNames(paste0("Ch", channels), channels)
+
+  if (is.null(labels) || length(labels) == 0) {
+    return(resolved)
+  }
+
+  labels <- unlist(labels)
+  labels <- labels[nzchar(labels)]
+  names(labels) <- sub("^ch", "", names(labels), ignore.case = TRUE)
+
+  shared <- intersect(names(labels), channels)
+  resolved[shared] <- labels[shared]
+  resolved
 }
 
 
@@ -151,7 +234,8 @@ normalize_channel <- function(expression, ids, method = "Z-score", negative_cont
 #' @param negative_controls_pattern Character. Regex pattern for negative controls (optional, overrides list)
 #' @param positive_controls Character vector. IDs of positive controls (excluded from analysis)
 #' @param positive_controls_pattern Character. Regex pattern for positive controls (optional, overrides list)
-#' @param channel_labels List with ch1 and ch2 names (default: list(ch1="IgE", ch2="IgG4"))
+#' @param channel_labels List/named vector. Labels per detected channel; NULL uses Ch<token>
+#' @param spot_metric Character. "ratio" (log2 signal/background) or "difference"
 #' @param progress_callback Function. Optional callback for progress updates
 #' @return Tibble in wide format: id + prefixed peptide columns (e.g., IgE_p001, IgG4_p001)
 #' @details
@@ -174,34 +258,41 @@ process_microarray_batch <- function(file_paths,
                                      negative_controls_pattern = NULL,
                                      positive_controls = NULL,
                                      positive_controls_pattern = NULL,
-                                     channel_labels = list(ch1 = "IgE", ch2 = "IgG4"),
+                                     channel_labels = NULL,
+                                     spot_metric = "ratio",
+                                     return_qc = FALSE,
                                      progress_callback = NULL) {
-  
+
+  qc_spots <- vector("list", length(file_paths))
+
   # Process each file
   data_list <- lapply(seq_along(file_paths), function(i) {
     file <- file_paths[i]
-    
-    # Read file
-    df <- read_microarray_file(file)
-    
-    # Normalize each channel independently
-    df <- df %>%
+
+    spots <- read_microarray_file(file, spot_metric = spot_metric,
+                                  with_quality = return_qc)
+
+    if (return_qc) {
+      qc_spots[[i]] <<- dplyr::mutate(
+        spots, sample = tools::file_path_sans_ext(basename(file))
+      )
+    }
+
+    df <- spots %>%
+      dplyr::group_by(channel) %>%
       dplyr::mutate(
-        MExpression_Ch1 = normalize_channel(
-          Expression_Ch1, ID, normalization_method, negative_controls
-        ),
-        MExpression_Ch2 = normalize_channel(
-          Expression_Ch2, ID, normalization_method, negative_controls
-        ),
-        Sample = tools::file_path_sans_ext(basename(file))
+        MExpression = normalize_channel(
+          Expression, ID, normalization_method, negative_controls
+        )
       ) %>%
-      dplyr::select(Sample, ID, MExpression_Ch1, MExpression_Ch2)
-    
-    # Update progress
+      dplyr::ungroup() %>%
+      dplyr::mutate(Sample = tools::file_path_sans_ext(basename(file))) %>%
+      dplyr::select(Sample, ID, channel, MExpression)
+
     if (!is.null(progress_callback)) {
       progress_callback(i, length(file_paths), basename(file))
     }
-    
+
     return(df)
   })
   
@@ -239,43 +330,29 @@ process_microarray_batch <- function(file_paths,
   
   # Average technical replicates
   data <- data %>%
-    dplyr::group_by(Sample, ID) %>%
-    dplyr::summarise(
-      MExpression_Ch1 = mean(MExpression_Ch1, na.rm = TRUE),
-      MExpression_Ch2 = mean(MExpression_Ch2, na.rm = TRUE),
-      .groups = "drop"
-    )
-  
-  # Pivot to wide format for each channel
-  data_ch1 <- data %>%
-    dplyr::select(Sample, ID, MExpression_Ch1) %>%
-    tidyr::pivot_wider(
-      names_from = ID, 
-      values_from = MExpression_Ch1,
-      names_prefix = paste0(channel_labels$ch1, "_")
-    )
-  
-  data_ch2 <- data %>%
-    dplyr::select(Sample, ID, MExpression_Ch2) %>%
-    tidyr::pivot_wider(
-      names_from = ID, 
-      values_from = MExpression_Ch2,
-      names_prefix = paste0(channel_labels$ch2, "_")
-    )
-  
-  # Merge both channels
-  wider_data <- data_ch1 %>%
-    dplyr::left_join(data_ch2, by = "Sample") %>%
+    dplyr::group_by(Sample, ID, channel) %>%
+    dplyr::summarise(MExpression = mean(MExpression, na.rm = TRUE), .groups = "drop")
+
+  labels <- resolve_channel_labels(sort(unique(data$channel)), channel_labels)
+
+  wider_data <- data %>%
+    dplyr::mutate(feature = paste0(labels[channel], "_", ID)) %>%
+    dplyr::select(Sample, feature, MExpression) %>%
+    tidyr::pivot_wider(names_from = feature, values_from = MExpression) %>%
     dplyr::rename(id = Sample) %>%
     dplyr::mutate(dplyr::across(where(is.numeric), ~round(.x, 2)))
   
-  # Report NA count (will be replaced with 0 in pepdata() final step)
+  # Report NA count (imputed later in pepdata())
   na_count_total <- sum(is.na(wider_data))
   if (na_count_total > 0) {
-    message(sprintf("Note: %d NA values from filtered flags will be replaced with 0 in final output", na_count_total))
+    message(sprintf("Note: %d NA values from filtered flags will be imputed downstream", na_count_total))
   }
-  
-  return(wider_data)
+
+  if (!return_qc) {
+    return(wider_data)
+  }
+
+  list(data = wider_data, qc = dplyr::bind_rows(qc_spots))
 }
 
 
@@ -397,6 +474,55 @@ get_unique_analytes <- function(file_paths, group_similar = TRUE) {
 }
 
 
+#' Read an Already-Processed Expression Matrix
+#'
+#' @param file_path Character. Path to .csv/.txt/.tsv/.xlsx
+#' @param orientation Character. "samples_in_rows" (default) or "features_in_rows"
+#' @return Tibble with `id` plus one numeric column per feature
+#' @details
+#' Public matrices ship in both orientations — the Dryad coronavirus chip puts
+#' features in rows and samples in columns, the opposite of what the app
+#' expects — so the caller declares which one it is rather than the reader
+#' guessing. Field separator is taken from the header line.
+read_processed_matrix <- function(file_path, orientation = "samples_in_rows") {
+
+  ext <- tools::file_ext(file_path)
+
+  df <- if (ext %in% c("xlsx", "xls")) {
+    readxl::read_excel(file_path)
+  } else {
+    header <- readLines(file_path, n = 1, warn = FALSE)
+    tabs <- lengths(regmatches(header, gregexpr("\t", header)))
+    commas <- lengths(regmatches(header, gregexpr(",", header)))
+    utils::read.delim(file_path, sep = if (tabs > commas) "\t" else ",",
+                      check.names = FALSE, stringsAsFactors = FALSE)
+  }
+
+  if (identical(orientation, "features_in_rows")) {
+    df <- transpose_expression_matrix(df)
+  }
+
+  df <- tibble::as_tibble(df)
+  names(df)[1] <- "id"
+  df
+}
+
+
+#' Flip a features-in-rows matrix into samples-in-rows
+#'
+#' @param df Data frame. First column holds feature names, remaining columns are samples
+#' @return Tibble with sample ids in the first column
+transpose_expression_matrix <- function(df) {
+  features <- make.unique(as.character(df[[1]]))
+  values <- t(as.matrix(df[, -1, drop = FALSE]))
+
+  out <- tibble::as_tibble(values, .name_repair = "minimal")
+  names(out) <- features
+
+  dplyr::bind_cols(tibble::tibble(id = colnames(df)[-1]), out)
+}
+
+
 #' Validate Processed Matrix Input
 #' 
 #' Checks if uploaded file is a valid preprocessed matrix
@@ -408,36 +534,44 @@ get_unique_analytes <- function(file_paths, group_similar = TRUE) {
 #' - Has sample ID column
 #' - Has numeric feature columns
 #' - Has channel prefixes (e.g., IgE_, IgG4_) or generic features
-validate_processed_matrix <- function(file_path) {
+validate_processed_matrix <- function(file_path, orientation = "samples_in_rows") {
   tryCatch({
     ext <- tools::file_ext(file_path)
-    
-    if (ext %in% c("xlsx", "xls")) {
-      df <- readxl::read_excel(file_path)
-    } else if (ext == "csv") {
-      df <- read.csv(file_path)
-    } else {
-      return(list(valid = FALSE, message = "Invalid file format. Use .csv or .xlsx"))
+
+    if (!ext %in% c("csv", "txt", "tsv", "xlsx", "xls")) {
+      return(list(valid = FALSE,
+                  message = "Invalid file format. Use .csv, .txt, .tsv or .xlsx"))
     }
-    
-    # Check for ID column
-    if (!"id" %in% tolower(colnames(df))) {
-      return(list(valid = FALSE, message = "Missing 'id' column"))
-    }
-    
-    # Check for numeric columns
-    numeric_cols <- sapply(df[, -1], is.numeric)
+
+    df <- read_processed_matrix(file_path, orientation)
+
+    numeric_cols <- vapply(df[, -1, drop = FALSE], is.numeric, logical(1))
+
     if (sum(numeric_cols) == 0) {
-      return(list(valid = FALSE, message = "No numeric feature columns found"))
+      return(list(valid = FALSE, message = paste0(
+        "No numeric feature columns found. If the file has features in rows and ",
+        "samples in columns, switch the orientation."
+      )))
     }
-    
-    return(list(
-      valid = TRUE, 
-      message = paste("Valid matrix:", nrow(df), "samples,", sum(numeric_cols), "features")
-    ))
-    
+
+    values <- as.matrix(df[, names(numeric_cols)[numeric_cols], drop = FALSE])
+    saturated <- sum(values == 65535, na.rm = TRUE)
+
+    message <- paste0("Valid matrix: ", nrow(df), " samples, ",
+                      sum(numeric_cols), " features",
+                      if (sum(!numeric_cols) > 0)
+                        paste0(" (", sum(!numeric_cols), " non-numeric columns ignored)") else "")
+
+    if (saturated > 0) {
+      message <- paste0(message, "\nWarning: ", saturated,
+                        " values sit exactly at 65535, the 16-bit scanner ceiling. ",
+                        "Those readings are censored, not real intensities.")
+    }
+
+    list(valid = TRUE, message = message)
+
   }, error = function(e) {
-    return(list(valid = FALSE, message = paste("Error reading file:", e$message)))
+    list(valid = FALSE, message = paste("Error reading file:", e$message))
   })
 }
 

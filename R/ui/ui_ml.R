@@ -65,19 +65,19 @@ ui_ml <- function() {
         tags$div(
           class = "ml-sidebar-item",
           `data-target` = "ml_pca_results",
-          icon("chart-scatter", style = "margin-right: 10px;"),
+          icon("chart-line", style = "margin-right: 10px;"),
           "PCA"
         ),
         tags$div(
           class = "ml-sidebar-item",
           `data-target` = "ml_pcoa_results",
-          icon("chart-scatter", style = "margin-right: 10px;"),
+          icon("chart-line", style = "margin-right: 10px;"),
           "PCoA"
         ),
         tags$div(
           class = "ml-sidebar-item",
           `data-target` = "ml_nmds_results",
-          icon("chart-scatter", style = "margin-right: 10px;"),
+          icon("chart-line", style = "margin-right: 10px;"),
           "NMDS"
         ),
         tags$div(

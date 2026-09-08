@@ -171,19 +171,9 @@ create_summary_value_boxes <- function(summary_stats, na_stats = NULL) {
     Icon = c("fa-users", "fa-dna", "fa-chart-line", "fa-chart-area", "fa-plus-circle", "fa-arrows-alt-h")
   )
 
-  # Append missing-value KPI (counts refer to the matrix BEFORE imputation)
-  if (!is.null(na_stats)) {
-    kpi_data <- dplyr::bind_rows(
-      kpi_data,
-      tibble(
-        Metric = "Peptides with NA",
-        Value = paste0(na_stats$n_peptides_with_na,
-                       " (", round(na_stats$pct_na, 1), "% cells)"),
-        Icon = "fa-exclamation-triangle"
-      )
-    )
-  }
-
+  # Missing-value reporting lives in the Quality Control tab, which breaks it
+  # down per array instead of giving a single global count. `na_stats` is kept
+  # in the signature so existing callers do not break.
   return(kpi_data)
 }
 

@@ -22,7 +22,6 @@ DEF_FILE="$SCRIPT_DIR/MicroarrAI.def"
 INSTANCE_NAME="${APP_NAME}"
 PORT=3838
 LOGS_DIR="$REPO_ROOT/logs"
-DATA_DIR="$REPO_ROOT/data"
 
 # Colors for output
 RED='\033[0;31m'
@@ -156,14 +155,9 @@ start_app() {
 
     print_info "Starting instance '$INSTANCE_NAME'..."
 
-    # Build bind mount arguments
+    # Only logs are bind-mounted: users upload their scans through the browser,
+    # so no host data directory is exposed to the container.
     BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server"
-
-    # Add data directory if it exists
-    if [ -d "$DATA_DIR" ]; then
-        BIND_ARGS="$BIND_ARGS --bind ${DATA_DIR}:/srv/shiny-server/MicroarrAI/data"
-        print_info "Data directory mounted: $DATA_DIR"
-    fi
 
     ${SINGULARITY_CMD} instance start \
         $BIND_ARGS \
@@ -283,9 +277,6 @@ open_shell() {
     prepare_directories
 
     BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server"
-    if [ -d "$DATA_DIR" ]; then
-        BIND_ARGS="$BIND_ARGS --bind ${DATA_DIR}:/srv/shiny-server/MicroarrAI/data"
-    fi
 
     print_info "Opening interactive shell inside the container..."
     print_info "(type 'exit' to leave)"

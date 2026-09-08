@@ -147,10 +147,10 @@ deploy:
 
 ```bash
 # Copy the example file
-cp .env.example .env
+cp docker/.env.example docker/.env
 
 # Edit as needed
-nano .env
+nano docker/.env
 
 # Apply changes
 docker-compose up -d
@@ -357,7 +357,7 @@ docker-compose exec microarrai ping -c 3 google.com
 ## 🔗 Enlaces Útiles
 
 - **Documentación completa**: [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)
-- **Configuración**: [.env.example](.env.example)
+- **Configuración**: [docker/.env.example](.env.example)
 - **Docker Hub**: https://hub.docker.com/
 - **Shiny Server**: https://shiny.rstudio.com/
 

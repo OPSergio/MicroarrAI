@@ -49,11 +49,14 @@ tmp/
 temp/
 *.tmp
 
-# Data files (optional - uncomment if you don't want to include data in image)
-# data/
-# *.csv
-# *.xlsx
-# *.rds
+# Any local scratch data must never be sent as build context
+data/
+
+# Dev-only launcher, never part of an image
+run_dev.R
+
+# Built Singularity image
+*.sif
 
 # Cache
 cache/

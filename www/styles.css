@@ -690,3 +690,19 @@ body.metis-light .ml-sidebar::-webkit-scrollbar-track { background: rgba(31, 42,
 @media (max-width: 760px) {
   .metis-links { display: none; }   /* mobile: brand only for now */
 }
+
+/* ============================================================================
+ * Panel titles — one heading language across Quality, Peptide finder and 3D
+ * ==========================================================================*/
+.mi-panel-title {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #8a8f98;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mi-panel-title + .shiny-html-output,
+.mi-panel-title + .girafe_container_std { margin-top: 0; }
+
+body.metis-light .mi-panel-title { color: #6b7280; }
