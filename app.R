@@ -84,7 +84,8 @@ server <- function(input, output, session){
   # and cached result) so the user never has to reload the browser manually.
   observeEvent(input$metis_reset, { session$reload() })
 
-  raw_data <- reactiveVal(NULL)
+  raw_data <- reactiveVal(NULL
+  )
   processed_data <- reactiveVal(NULL)
   database <- reactiveVal(NULL)
   database_edited <- reactiveVal(NULL)
@@ -3154,6 +3155,39 @@ output$normalization_method_description <- renderUI({
     message("ML.db prepared with ", nrow(result), " samples and ", ncol(result), " features")
     result
   })
+
+  # Runs an ML training reactive and keeps the error instead of collapsing a
+  # failure to a bare NULL, so panels can say WHY training failed instead of
+  # going quietly blank.
+  capture_ml_result <- function(reactive_call) {
+    tryCatch(list(result = reactive_call(), error = NULL),
+             error = function(e) {
+               # An empty message is req()/validate() not satisfied yet (e.g.
+               # the pipeline hasn't been run), not a real training failure.
+               msg <- conditionMessage(e)
+               list(result = NULL, error = if (nzchar(msg)) msg else NULL)
+             })
+  }
+
+  # Same assessment used by train_model_advanced(), reused here so the
+  # disclaimer shows up BEFORE the user clicks "Run" (and doesn't require a
+  # successful training run to be seen).
+  ml_size_check <- reactive({
+    # Only evaluate once an actual training attempt has been made (the user
+    # clicked "Run ML Pipeline"), not as soon as a target variable is picked —
+    # a disclaimer nobody asked for yet is just noise.
+    req(input$ml_run_pipeline, ML.db())
+    db <- ML.db()
+    ml_sample_size_check(
+      n = nrow(db), class_counts = table(db$target), n_features = ncol(db) - 1,
+      cv_folds = 3  # matches cv_folds passed to train_model_advanced() below
+    )
+  })
+
+  output$ml_sample_size_banner <- renderUI({
+    check <- tryCatch(ml_size_check(), error = function(e) NULL)
+    ml_disclaimer_banner(check)
+  })
   
   # ===== ADVANCED TRAINING REACTIVES (OPTIONAL) =====
   
@@ -3282,9 +3316,11 @@ output$normalization_method_description <- renderUI({
   # C5.0 Panel
   output$c50_panel_content <- renderUI({
     req(input$ml_use_c50)
-    
-    result <- tryCatch(c50_advanced_result(), error = function(e) NULL)
+
+    outcome <- capture_ml_result(c50_advanced_result)
+    result <- outcome$result
     use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else FALSE
+    size_check <- tryCatch(ml_size_check(), error = function(e) NULL)
     
     card_container(
       style = "margin: 0 15px; padding: 25px;",
@@ -3302,9 +3338,11 @@ output$normalization_method_description <- renderUI({
           "Builds interpretable decision trees using information gain ratio. Supports boosting with multiple trials to improve accuracy. Automatically handles missing values and provides variable importance scores."
         )
       ),
-      
+
       tags$hr(style = "margin: 20px 0; border-color: #ddd;"),
-      
+
+      ml_disclaimer_banner(size_check),
+
       # Two-column layout
       fluidRow(
         # Left column: Histogram
@@ -3336,6 +3374,8 @@ output$normalization_method_description <- renderUI({
                 n_features <- if(!is.null(result$varimp)) nrow(result$varimp$importance) else 0
                 cv_info <- if(use_cv) "3-Fold CV" else "No CV"
                 paste0("C5.0 + ", cv_info, " | ", n_features, " features")
+              } else if (!is.null(outcome$error)) {
+                paste0("Training failed: ", outcome$error)
               } else {
                 "C5.0 Model"
               }
@@ -3356,9 +3396,11 @@ output$normalization_method_description <- renderUI({
   # Random Forest Panel
   output$rf_panel_content <- renderUI({
     req(input$ml_use_rf)
-    
-    result <- tryCatch(rf_advanced_result(), error = function(e) NULL)
+
+    outcome <- capture_ml_result(rf_advanced_result)
+    result <- outcome$result
     use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else FALSE
+    size_check <- tryCatch(ml_size_check(), error = function(e) NULL)
     
     card_container(
       style = "margin: 0 15px; padding: 25px;",
@@ -3376,9 +3418,11 @@ output$normalization_method_description <- renderUI({
           "Ensemble learning method that builds multiple decision trees on bootstrap samples and aggregates their predictions. Highly robust against overfitting and effective for high-dimensional data. Importance calculated using Mean Decrease in Gini impurity."
         )
       ),
-      
+
       tags$hr(style = "margin: 20px 0; border-color: #ddd;"),
-      
+
+      ml_disclaimer_banner(size_check),
+
       # Two-column layout
       fluidRow(
         # Left column: Histogram
@@ -3410,6 +3454,8 @@ output$normalization_method_description <- renderUI({
                 n_features <- if(!is.null(result$varimp)) nrow(result$varimp$importance) else 0
                 cv_info <- if(use_cv) "3-Fold CV" else "No CV"
                 paste0("RF + ", cv_info, " | ", n_features, " features")
+              } else if (!is.null(outcome$error)) {
+                paste0("Training failed: ", outcome$error)
               } else {
                 "Random Forest Model"
               }
@@ -3430,10 +3476,12 @@ output$normalization_method_description <- renderUI({
   # SVM Panel
   output$svm_panel_content <- renderUI({
     req(input$ml_use_svm)
-    
-    result <- tryCatch(svm_advanced_result(), error = function(e) NULL)
+
+    outcome <- capture_ml_result(svm_advanced_result)
+    result <- outcome$result
     use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else FALSE
     use_rfe <- if(!is.null(input$ml_use_rfe)) input$ml_use_rfe else FALSE
+    size_check <- tryCatch(ml_size_check(), error = function(e) NULL)
     
     card_container(
       style = "margin: 0 15px; padding: 25px;",
@@ -3451,9 +3499,15 @@ output$normalization_method_description <- renderUI({
           "Finds the optimal hyperplane that maximizes the margin between classes. Linear kernel used with cost parameter C=10. Features selected using Recursive Feature Elimination (RFE) with cross-validation."
         )
       ),
-      
+
       tags$hr(style = "margin: 20px 0; border-color: #ddd;"),
-      
+
+      ml_disclaimer_banner(size_check),
+
+      if (!is.null(result) && isTRUE(result$skipped)) {
+        ml_disclaimer_banner(list(severity = "low", message = result$skip_reason))
+      },
+
       # Two-column layout
       fluidRow(
         # Left column: Feature list
@@ -3469,18 +3523,22 @@ output$normalization_method_description <- renderUI({
             tags$div(
               style = "font-size: 13px; color: #191c32; font-weight: 500;",
               icon("cog", style = "color: #ff6b6b; margin-right: 8px;"),
-              if(!is.null(result)) {
+              if (!is.null(result) && isTRUE(result$skipped)) {
+                "SVM not run (see note above)"
+              } else if(!is.null(result)) {
                 n_features <- if(!is.null(result$selected_features)) length(result$selected_features) else 0
                 cv_info <- if(use_cv) "3-Fold CV" else "No CV"
                 rfe_info <- if(use_rfe) " + RFE" else ""
                 paste0("SVM + ", cv_info, rfe_info, " | ", n_features, " features")
+              } else if (!is.null(outcome$error)) {
+                paste0("Training failed: ", outcome$error)
               } else {
                 "SVM Model"
               }
             )
           ),
           # Performance metrics - Radar plot
-          if(use_cv && !is.null(result)) {
+          if(use_cv && !is.null(result) && !isTRUE(result$skipped)) {
             tags$div(
               style = "background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 0;",
               girafeOutput("svm_radar", height = "280px")
@@ -3494,9 +3552,11 @@ output$normalization_method_description <- renderUI({
   # XGBoost Panel
   output$xgboost_panel_content <- renderUI({
     req(input$ml_use_xgboost)
-    
-    result <- tryCatch(xgboost_advanced_result(), error = function(e) NULL)
+
+    outcome <- capture_ml_result(xgboost_advanced_result)
+    result <- outcome$result
     use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else FALSE
+    size_check <- tryCatch(ml_size_check(), error = function(e) NULL)
     
     card_container(
       style = "margin: 0 15px; padding: 25px;",
@@ -3514,9 +3574,11 @@ output$normalization_method_description <- renderUI({
           "Scalable gradient boosting algorithm that builds sequential trees to correct errors from previous iterations. Highly efficient for large datasets with complex feature interactions. SHAP (SHapley Additive exPlanations) values provide model interpretability."
         )
       ),
-      
+
       tags$hr(style = "margin: 20px 0; border-color: #ddd;"),
-      
+
+      ml_disclaimer_banner(size_check),
+
       # Two-column layout
       fluidRow(
         # Left column: Importance plot (SHAP or VarImp)
@@ -3558,6 +3620,8 @@ output$normalization_method_description <- renderUI({
                 n_features <- if(!is.null(result$varimp)) nrow(result$varimp$importance) else 0
                 cv_info <- if(use_cv) "3-Fold CV" else "No CV"
                 paste0("XGBoost + ", cv_info, " | ", n_features, " features")
+              } else if (!is.null(outcome$error)) {
+                paste0("Training failed: ", outcome$error)
               } else {
                 "XGBoost Model"
               }
@@ -3618,22 +3682,24 @@ output$normalization_method_description <- renderUI({
   # C5.0 Feature Importance Plot (uses c50_advanced_result reactive)
   output$c5.plot <- renderPlot({
     req(input$ml_use_c50)
-    
+
     top_n <- if(!is.null(input$c50_top_n)) input$c50_top_n else 15
-    result <- tryCatch(c50_advanced_result(), error = function(e) NULL)
-    
+    outcome <- capture_ml_result(c50_advanced_result)
+    result <- outcome$result
+
     if (is.null(result) || is.null(result$varimp)) {
-      return(ggplot() + 
-        annotate("text", x = 0, y = 0, label = "Variable importance not available") +
-        theme_void())
+      reason <- if (!is.null(outcome$error)) {
+        paste0("Training failed:\n", outcome$error)
+      } else {
+        "Variable importance not available"
+      }
+      return(ml_unavailable_plot(reason))
     }
-    
+
     importance_df <- format_varimp_df(result$varimp, top_n = top_n)
-    
+
     if (is.null(importance_df) || nrow(importance_df) == 0) {
-      return(ggplot() + 
-        annotate("text", x = 0, y = 0, label = "No features available") +
-        theme_void())
+      return(ml_unavailable_plot("No features available"))
     }
     
     # Simple ggplot
@@ -3710,22 +3776,24 @@ output$normalization_method_description <- renderUI({
   # RF Feature Importance Plot (uses rf_advanced_result reactive)
   output$rf.plot <- renderPlot({
     req(input$ml_use_rf)
-    
+
     top_n <- if(!is.null(input$rf_top_n)) input$rf_top_n else 15
-    result <- tryCatch(rf_advanced_result(), error = function(e) NULL)
-    
+    outcome <- capture_ml_result(rf_advanced_result)
+    result <- outcome$result
+
     if (is.null(result) || is.null(result$varimp)) {
-      return(ggplot() + 
-        annotate("text", x = 0, y = 0, label = "Variable importance not available") +
-        theme_void())
+      reason <- if (!is.null(outcome$error)) {
+        paste0("Training failed:\n", outcome$error)
+      } else {
+        "Variable importance not available"
+      }
+      return(ml_unavailable_plot(reason))
     }
-    
+
     importance_df <- format_varimp_df(result$varimp, top_n = top_n)
-    
+
     if (is.null(importance_df) || nrow(importance_df) == 0) {
-      return(ggplot() + 
-        annotate("text", x = 0, y = 0, label = "No features available") +
-        theme_void())
+      return(ml_unavailable_plot("No features available"))
     }
     
     # Simple ggplot
@@ -3793,11 +3861,19 @@ output$normalization_method_description <- renderUI({
   # SVM Features List UI
   output$svm_features_list <- renderUI({
     req(input$ml_use_svm)
-    
+
     features <- variables_importantes_reactive()
-    
+
     if(length(features) == 0) {
-      return(tags$p("No features available", style = "color: #666; font-style: italic;"))
+      outcome <- capture_ml_result(svm_advanced_result)
+      msg <- if (!is.null(outcome$result) && isTRUE(outcome$result$skipped)) {
+        outcome$result$skip_reason
+      } else if (!is.null(outcome$error)) {
+        paste0("Training failed: ", outcome$error)
+      } else {
+        "No features available"
+      }
+      return(tags$p(msg, style = "color: #666; font-style: italic; white-space: pre-wrap;"))
     }
     
     tags$div(
@@ -3816,11 +3892,11 @@ output$normalization_method_description <- renderUI({
   output$svm_radar <- renderGirafe({
     req(input$ml_use_svm)
     result <- tryCatch(svm_advanced_result(), error = function(e) NULL)
-    
-    if(is.null(result)) {
+
+    if(is.null(result) || isTRUE(result$skipped)) {
       return(NULL)
     }
-    
+
     create_performance_radar(result, model_color = "#ff6b6b")
   })
   
@@ -3969,21 +4045,23 @@ output$normalization_method_description <- renderUI({
     } else {
       # Variable Importance (caret::varImp)
       top_n <- if(!is.null(input$xgb_top_n)) input$xgb_top_n else 15
-      
-      result <- tryCatch(xgboost_advanced_result(), error = function(e) NULL)
-      
+
+      outcome <- capture_ml_result(xgboost_advanced_result)
+      result <- outcome$result
+
       if (is.null(result) || is.null(result$varimp)) {
-        return(ggplot() + 
-          annotate("text", x = 0, y = 0, label = "Variable importance not available") +
-          theme_void())
+        reason <- if (!is.null(outcome$error)) {
+          paste0("Training failed:\n", outcome$error)
+        } else {
+          "Variable importance not available"
+        }
+        return(ml_unavailable_plot(reason))
       }
-      
+
       importance_df <- format_varimp_df(result$varimp, top_n = top_n)
-      
+
       if (is.null(importance_df) || nrow(importance_df) == 0) {
-        return(ggplot() + 
-          annotate("text", x = 0, y = 0, label = "No features available") +
-          theme_void())
+        return(ml_unavailable_plot("No features available"))
       }
       
       # Simple ggplot

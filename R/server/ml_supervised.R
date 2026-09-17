@@ -71,6 +71,60 @@ xgbtree_method_fixed <- function() {
   m
 }
 
+#' Assess whether a dataset is safe for the ML pipeline (repeated CV + RFE)
+#'
+#' This never blocks training — deciding whether to trust a small-N result is
+#' for a human, not the app — but it gives every caller (the pre-run banner and
+#' each model panel) the same severity and message, so "no importance shown"
+#' always comes with a reason instead of an empty plot.
+#'
+#' @param n Integer. Number of samples.
+#' @param class_counts Named integer vector/table. Samples per target class.
+#' @param n_features Integer. Number of predictor columns.
+#' @param cv_folds Integer. CV folds the pipeline will use (default 3).
+#' @return List with `severity` ("ok"/"low"/"critical"), `n`, `n_features`,
+#'   `class_counts`, `message` (Spanish, ready to display).
+#' @export
+ml_sample_size_check <- function(n, class_counts, n_features, cv_folds = 3) {
+  class_counts <- class_counts[class_counts > 0]
+  min_class <- if (length(class_counts) > 0) min(class_counts) else 0L
+  per_fold  <- min_class / cv_folds
+
+  severity <- if (min_class < cv_folds) {
+    "critical"
+  } else if (n < 30 || per_fold < 3 || n_features > n) {
+    "low"
+  } else {
+    "ok"
+  }
+
+  summary_line <- paste0(
+    "n = ", n, " | features = ", n_features, " | classes: ",
+    paste(names(class_counts), "=", as.integer(class_counts), collapse = ", ")
+  )
+
+  msg <- switch(severity,
+    critical = paste0(
+      "Sample too small for ", cv_folds, "-fold CV: the minority class has only ",
+      min_class, " observations, fewer than the number of folds. Some fold may end ",
+      "up without that class, and training can fail for any of the models. ",
+      summary_line, "."
+    ),
+    low = paste0(
+      "Small sample for Machine Learning (", summary_line, "). With ~",
+      round(per_fold, 1), " minority-class observations per fold and ",
+      n_features, " features for only ", n, " samples (more features than ",
+      "samples), variable importance and the biomarker ranking can vary widely ",
+      "with the random seed and may not generalize. Treat these results as ",
+      "EXPLORATORY, not as confirmed biomarkers."
+    ),
+    ok = summary_line
+  )
+
+  list(severity = severity, n = n, n_features = n_features,
+       class_counts = class_counts, message = msg)
+}
+
 #' result <- train_model_advanced(data, model_type = "svm", use_rfe = TRUE, use_cv = TRUE)
 #'
 #' @export
@@ -97,7 +151,55 @@ train_model_advanced <- function(data,
   if (!is.factor(data$target)) {
     data$target <- as.factor(data$target)
   }
-  
+
+  # caret requires class levels to be syntactically valid R names as soon as
+  # classProbs=TRUE (always the case below): a label like "Bajo riesgo" or
+  # "Buena evolucion" aborts caret::train() for EVERY model with "At least one
+  # of the class levels is not a valid R variable name", before any importance
+  # is ever computed. Sanitize for the fit and keep the original labels here so
+  # anything that wants to display them still can.
+  original_levels <- levels(data$target)
+  safe_levels <- make.names(original_levels, unique = TRUE)
+  if (!identical(original_levels, safe_levels)) {
+    message("[LEVELS] Sanitizing target levels for caret: ",
+            paste(original_levels, "->", safe_levels, collapse = ", "))
+    levels(data$target) <- safe_levels
+  }
+  level_map <- stats::setNames(original_levels, safe_levels)
+
+  # Sample-size disclaimer: this never blocks training (a human should decide
+  # whether to trust the run), but every result carries the assessment so the
+  # UI can show a clear warning instead of silently going blank when N is too
+  # small for repeated CV to be stable.
+  size_check <- ml_sample_size_check(
+    n = nrow(data), class_counts = table(data$target), n_features = ncol(data) - 1,
+    cv_folds = cv_folds
+  )
+
+  # SVM has no built-in variable importance (see get_rfe_capabilities():
+  # provides_importance = FALSE for svm) -- the only ranking it can ever show
+  # is the RFE-selected feature list, and RFE itself needs CV to evaluate
+  # subsets. Without both RFE and CV, training would "succeed" but hand back
+  # either every feature (meaningless as a ranking) or nothing at all. Rather
+  # than run it anyway and leave the user guessing why the panel is empty or
+  # useless, skip it outright and say so.
+  if (model_type == "svm" && !(use_rfe && use_cv)) {
+    reason <- paste0(
+      "SVM was not run: it has no built-in variable importance, so its feature ",
+      "ranking only comes from Recursive Feature Elimination (RFE), and RFE ",
+      "itself requires Cross-Validation to evaluate feature subsets. Enable ",
+      "both 'RFE' and 'Cross-Validation' to run SVM."
+    )
+    message("[SVM] SKIPPED: ", reason)
+    return(list(
+      model_type = model_type, use_rfe = use_rfe, use_cv = use_cv,
+      rfe_used = FALSE, rfe_reason = reason,
+      selected_features = NULL, metrics = list(), cv_results = NULL,
+      rfe_results = NULL, model = NULL, level_map = level_map,
+      sample_size = size_check, skipped = TRUE, skip_reason = reason
+    ))
+  }
+
   # Initialize result list
   result <- list(
     model_type = model_type,
@@ -109,9 +211,13 @@ train_model_advanced <- function(data,
     metrics = list(),
     cv_results = NULL,
     rfe_results = NULL,
-    model = NULL
+    model = NULL,
+    level_map = level_map,      # safe caret level -> original label
+    sample_size = size_check,   # severity + disclaimer for small N / n<<p
+    skipped = FALSE,            # TRUE only via the SVM guard above
+    skip_reason = NULL
   )
-  
+
   # Convert factors to dummy variables for SVM (required for RFE and model training)
   if (model_type == "svm") {
     # First convert factors to dummies
@@ -1245,6 +1351,48 @@ plot_varimp_histogram <- function(varimp_df) {
       y = "Relative importance"
     ) +
     ggplot2::theme_minimal()
+}
+
+#' Placeholder plot for when importance couldn't be produced, WITH the reason
+#'
+#' A blank "not available" plot leaves the user guessing whether it's a bug, a
+#' misclick, or the data. This always says which.
+#'
+#' @param reason Character. Why importance is unavailable, e.g. a caret error
+#'   message or "not requested".
+#' @return ggplot2 object
+#' @export
+ml_unavailable_plot <- function(reason = "Variable importance not available") {
+  etiqueta <- paste(strwrap(reason, width = 50), collapse = "\n")
+  ggplot2::ggplot() +
+    ggplot2::annotate("text", x = 0, y = 0, label = etiqueta, size = 3.6, colour = "#8a1f11") +
+    ggplot2::xlim(-1, 1) + ggplot2::ylim(-1, 1) +
+    ggplot2::theme_void()
+}
+
+#' Shiny warning banner for an ml_sample_size_check() assessment
+#'
+#' @param check List from ml_sample_size_check(), or NULL.
+#' @return A shiny tag, or NULL when severity is "ok" (nothing to warn about).
+#' @export
+ml_disclaimer_banner <- function(check) {
+  if (is.null(check) || identical(check$severity, "ok")) return(NULL)
+
+  paleta <- list(
+    critical = c(bg = "#f8d7da", border = "#dc3545", fg = "#721c24", icono = "triangle-exclamation"),
+    low      = c(bg = "#fff3cd", border = "#ffc107", fg = "#664d03", icono = "circle-info")
+  )
+  col <- paleta[[check$severity]]
+
+  shiny::tags$div(
+    style = paste0(
+      "background:", col[["bg"]], "; border-left: 4px solid ", col[["border"]],
+      "; color:", col[["fg"]], "; padding: 12px 15px; border-radius: 6px; ",
+      "font-size: 13px; line-height: 1.5; margin-bottom: 15px;"
+    ),
+    shiny::icon(col[["icono"]], style = "margin-right: 8px;"),
+    check$message
+  )
 }
 
 create_performance_summary_cards <- function(result, model_name) {

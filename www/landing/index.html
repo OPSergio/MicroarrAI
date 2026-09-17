@@ -141,15 +141,15 @@
         </span>
         <h1 class="font-display font-bold tracking-tight leading-[1.04] mt-6 text-[clamp(40px,6.5vw,72px)]">
           From raw arrays to<br />
-          <span class="grad">immunogenic insight</span>
+          <span class="grad">candidate biomarkers</span>
         </h1>
         <p class="mx-auto mt-6 max-w-xl text-[clamp(16px,1.6vw,19px)] leading-relaxed text-muted">
-          MicroarrAI is a reproducible analysis pipeline that takes peptide microarray data
-          from raw signal to candidate biomarkers, mapping them onto the 3D structure of the
-          antigen. Scroll through the methodology.
+          MicroarrAI processes peptide microarray data, from raw signal to candidate
+          biomarkers, and maps the results onto the 3D structure of the antigen. The
+          sections below describe each stage of the pipeline.
         </p>
         <div class="mt-9 flex flex-wrap items-center justify-center gap-3">
-          <a href="#preprocessing" class="btn-primary">Explore the workflow</a>
+          <a href="#preprocessing" class="btn-primary">Pipeline stages</a>
           <a href="#" class="btn-ghost">Open the application</a>
         </div>
         <div class="mt-12 flex flex-col items-center gap-2 text-[11px] tracking-[0.25em] uppercase text-muted">
@@ -165,13 +165,13 @@
     <section id="preprocessing" data-stage="intro" class="panel min-h-screen flex items-center justify-start px-6 sm:px-12 lg:px-24 pt-28 pb-16">
       <div class="reveal card">
         <span class="step">01 — Preprocessing</span>
-        <h2 class="card-h2">Clean signal, honest baseline</h2>
+        <h2 class="card-h2">Background correction and normalization</h2>
         <p class="card-p">
           Arrays are background-corrected spot by spot, non-specific signal is removed using
           negative controls, and the matrix is normalized — z-score, median scaling or quantile.
           Zero-variance features are dropped automatically.
         </p>
-        <p class="text-muted text-sm">The protein stays neutral. No conclusions drawn yet.</p>
+        <p class="text-muted text-sm">At this stage the 3D structure is not colored by data.</p>
       </div>
     </section>
 
@@ -179,12 +179,12 @@
     <section id="peptides" data-stage="color" class="panel min-h-screen flex items-center justify-end px-6 sm:px-12 lg:px-24 pt-28 pb-16">
       <div class="reveal card">
         <span class="step">02 — Differential analysis</span>
-        <h2 class="card-h2">Where the signal lives</h2>
+        <h2 class="card-h2">Identifying differentially expressed peptides</h2>
         <p class="card-p">
           Parametric and non-parametric tests, GLM/LM models, AUC, BH-adjusted p-values and
-          fold-change surface the peptides that truly separate conditions.
+          fold-change are used to identify the peptides that differ between conditions.
         </p>
-        <p class="highlight-green">Watch the structure light up — expression is now painted onto the residues.</p>
+        <p class="highlight-green">The 3D structure is now colored by expression level at each residue.</p>
       </div>
     </section>
 
@@ -192,12 +192,12 @@
     <section id="ml" data-stage="biomarkers" class="panel min-h-screen flex items-center justify-start px-6 sm:px-12 lg:px-24 pt-28 pb-16">
       <div class="reveal card">
         <span class="step">03 — Machine learning</span>
-        <h2 class="card-h2">The biomarkers emerge</h2>
+        <h2 class="card-h2">Ranking candidate biomarkers</h2>
         <p class="card-p">
-          Random Forest, C5.0 and SVM-RFE rank the features that matter. The most informative
-          peptides rise to the surface as candidate biomarkers.
+          Random Forest, C5.0 and SVM-RFE are used to rank peptides by importance and select
+          candidate biomarkers.
         </p>
-        <p class="highlight-orange">The biomarker residues now stand out on the protein in orange.</p>
+        <p class="highlight-orange">Residues corresponding to the selected biomarkers are highlighted in orange on the structure.</p>
       </div>
     </section>
 
@@ -205,12 +205,12 @@
     <section id="viz" data-stage="focus" class="panel min-h-screen flex items-center justify-end px-6 sm:px-12 lg:px-24 pt-28 pb-16">
       <div class="reveal card">
         <span class="step">04 — 3D visualization</span>
-        <h2 class="card-h2">Read them in context</h2>
+        <h2 class="card-h2">Mapping biomarkers onto the structure</h2>
         <p class="card-p">
-          Candidate peptides are mapped onto the AlphaFold structure so you can judge
-          accessibility and immune-receptor interaction in space — not just on a list.
+          Candidate peptides are mapped onto the AlphaFold structure to show their position,
+          surface accessibility and potential interaction with immune receptors.
         </p>
-        <a href="#" class="btn-primary mt-2 inline-block">Open the 3D explorer</a>
+        <a href="#" class="btn-primary mt-2 inline-block">Open the 3D viewer</a>
       </div>
     </section>
 
@@ -218,9 +218,9 @@
     <section id="docs" data-stage="focus" class="panel min-h-screen flex items-center justify-center text-center px-6 pt-28 pb-24">
       <div class="reveal spot max-w-3xl">
         <h2 class="font-display font-bold tracking-tight leading-[1.05] text-[clamp(34px,6vw,64px)]">
-          From <span class="grad">microarray</span> to <span class="grad">marker</span>.
+          Pipeline summary
         </h2>
-        <p class="mt-5 text-[clamp(16px,1.6vw,19px)] text-muted">A reproducible workflow, from raw signal to validated candidate.</p>
+        <p class="mt-5 text-[clamp(16px,1.6vw,19px)] text-muted">This pipeline takes peptide microarray data from raw signal to candidate biomarkers mapped onto the antigen structure.</p>
         <a href="#" class="btn-primary mt-8 inline-block">Open the application</a>
       </div>
     </section>

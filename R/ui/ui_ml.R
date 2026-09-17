@@ -376,7 +376,13 @@ ui_ml <- function() {
               )
             )
           ),
-          
+
+          # Sample-size disclaimer: shown as soon as the clinical DB + target
+          # are loaded, before the user spends time clicking "Run".
+          fluidRow(
+            column(12, uiOutput("ml_sample_size_banner"))
+          ),
+
           # Launch Button
           fluidRow(
             column(12,
