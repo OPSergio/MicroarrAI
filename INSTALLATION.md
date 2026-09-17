@@ -116,6 +116,7 @@ Or manually:
 ```bash
 mkdir -p logs
 singularity instance start \
+    --containall --no-home --writable-tmpfs \
     --bind ./logs:/var/log/shiny-server \
     MicroarrAI.sif microarrai
 ```
@@ -134,6 +135,7 @@ To raise the upload ceiling (RAW mode sends a whole scan set in one request):
 ```bash
 SINGULARITYENV_MICROARRAI_MAX_UPLOAD_MB=2048 \
 singularity instance start \
+    --containall --no-home --writable-tmpfs \
     --bind ./logs:/var/log/shiny-server \
     MicroarrAI.sif microarrai
 ```

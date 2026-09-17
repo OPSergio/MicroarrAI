@@ -235,6 +235,8 @@ normalize_channel <- function(expression, ids, method = "Z-score", negative_cont
 #' @param positive_controls Character vector. IDs of positive controls (excluded from analysis)
 #' @param positive_controls_pattern Character. Regex pattern for positive controls (optional, overrides list)
 #' @param channel_labels List/named vector. Labels per detected channel; NULL uses Ch<token>
+#' @param channels Character vector. Channel tokens to keep ("1", "2", "635");
+#'   NULL keeps every channel found in the files
 #' @param spot_metric Character. "ratio" (log2 signal/background) or "difference"
 #' @param progress_callback Function. Optional callback for progress updates
 #' @return Tibble in wide format: id + prefixed peptide columns (e.g., IgE_p001, IgG4_p001)
@@ -259,6 +261,7 @@ process_microarray_batch <- function(file_paths,
                                      positive_controls = NULL,
                                      positive_controls_pattern = NULL,
                                      channel_labels = NULL,
+                                     channels = NULL,
                                      spot_metric = "ratio",
                                      return_qc = FALSE,
                                      progress_callback = NULL) {
@@ -271,6 +274,16 @@ process_microarray_batch <- function(file_paths,
 
     spots <- read_microarray_file(file, spot_metric = spot_metric,
                                   with_quality = return_qc)
+
+    # Single-channel analysis: drop the other channel(s) before anything is
+    # normalized or reported, so QC and features agree on what was analysed.
+    if (!is.null(channels)) {
+      spots <- dplyr::filter(spots, channel %in% channels)
+      if (nrow(spots) == 0) {
+        stop("None of the selected channels (", paste(channels, collapse = ", "),
+             ") were found in ", basename(file))
+      }
+    }
 
     if (return_qc) {
       qc_spots[[i]] <<- dplyr::mutate(

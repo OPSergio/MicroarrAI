@@ -230,6 +230,14 @@ output$normalization_method_description <- renderUI({
     )
   })
 
+  # The checkbox group only exists for multi-channel files; a single-channel
+  # scan is always analysed as-is.
+  selected_channels <- reactive({
+    channels <- detected_channels()
+    if (length(channels) <= 1) return(channels)
+    intersect(input$use_channels, channels)
+  })
+
   output$channel_labels_ui <- renderUI({
     channels <- detected_channels()
     legacy <- c("IgE", "IgG4")
@@ -238,6 +246,13 @@ output$normalization_method_description <- renderUI({
       tags$p(sprintf("%d channel%s detected in these files.",
                      length(channels), if (length(channels) == 1) "" else "s"),
              style = "color: #6c757d; font-size: 13px; margin-bottom: 12px;"),
+      # Which channels become features. Untick one to analyse a single channel
+      # (e.g. only the IgE scan of a two-channel array).
+      if (length(channels) > 1) checkboxGroupInput(
+        "use_channels", dark_label("Channels to analyse:"),
+        choices = stats::setNames(channels, paste0("Channel ", channels)),
+        selected = channels, inline = TRUE
+      ),
       lapply(seq_along(channels), function(i) {
         textInput(
           paste0("ch_label_", channels[i]),
@@ -518,6 +533,12 @@ output$normalization_method_description <- renderUI({
     
     files <- list.files(path = path1(), pattern = ARRAY_FILE_PATTERN, full.names = TRUE)
     
+    use_channels <- selected_channels()
+    if (length(use_channels) == 0) {
+      showNotification("Select at least one channel to analyse.", type = "error")
+      return()
+    }
+
     withProgress(message = 'Processing files...', value = 0, {
       ch_labels <- channel_labels()
       
@@ -563,6 +584,7 @@ output$normalization_method_description <- renderUI({
         positive_controls = pos_controls,
         positive_controls_pattern = pos_regex_pattern,
         channel_labels = ch_labels,
+        channels = use_channels,
         spot_metric = if (is.null(input$spot_metric)) "ratio" else input$spot_metric,
         return_qc = TRUE,
         progress_callback = function(i, total, name) {
@@ -662,6 +684,9 @@ output$normalization_method_description <- renderUI({
     
     if (ext %in% c("xlsx", "xls")) {
       df <- readxl::read_excel(input$db_fileinput$datapath)
+      # read.csv sanitizes names by default; read_excel does not. Column names
+      # end up inside model formulas, where R evaluates them as code.
+      names(df) <- make.names(names(df), unique = TRUE)
     } else if (ext == "csv") {
       # Apply advanced CSV options if available
       if (use_advanced) {
@@ -831,13 +856,14 @@ output$normalization_method_description <- renderUI({
       # Sheet 3: Processing log
       log_data <- data.frame(
         Parameter = c("Processing Date", "Input Mode", "Normalization Method",
-                     "Channel Labels", "Spot Signal", "Negative Controls",
-                     "Inter-sample Normalization"),
+                     "Channel Labels", "Channels Analysed", "Spot Signal",
+                     "Negative Controls", "Inter-sample Normalization"),
         Value = c(
           as.character(Sys.Date()),
           if (!is.null(input$input_mode)) input$input_mode else "N/A",
           if (!is.null(input$normalization_method)) input$normalization_method else "N/A",
           paste(tryCatch(channel_labels(), error = function(e) "N/A"), collapse = ", "),
+          paste(tryCatch(selected_channels(), error = function(e) "N/A"), collapse = ", "),
           if (!is.null(input$spot_metric)) input$spot_metric else "ratio",
           if (!is.null(input$negative_controls)) paste(input$negative_controls, collapse = ", ") else "N/A",
           if (!is.null(input$enable_inter_norm) && input$enable_inter_norm) 
@@ -3935,7 +3961,7 @@ output$normalization_method_description <- renderUI({
       
       
       # Entrenar el modelo SVM con las tres mejores variables
-      modelo_svm_3d <- svm(formula = as.formula(paste("target ~", paste(predictoras_3d, collapse = " + "))),
+      modelo_svm_3d <- svm(formula = as.formula(paste("target ~", paste(quote_terms(predictoras_3d), collapse = " + "))),
                            data = df.scaled, kernel = "linear", cost = 10)
       
       # Crear una cuadrícula de valores para las tres variables predictoras

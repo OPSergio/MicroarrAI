@@ -504,6 +504,25 @@ server_protein_viz <- function(input, output, session,
     radioButtons("protein_group", "Group", choices = g, selected = g[1])
   })
 
+  # Group the Δ-groups mode and the tooltip fold change compare against. With
+  # two groups it is simply the other one; with three or more the user picks.
+  other_groups <- reactive({
+    setdiff(protein_groups(), input$protein_group %||% protein_groups()[1])
+  })
+  output$protein_ref_group_ui <- renderUI({
+    others <- other_groups()
+    if (length(others) < 2) return(NULL)
+    radioButtons("protein_ref_group", "Compare with", choices = others,
+                 selected = if (isTRUE(input$protein_ref_group %in% others)) input$protein_ref_group else others[1])
+  })
+  reference_group <- reactive({
+    others <- other_groups()
+    if (length(others) == 0) return(NULL)
+    if (length(others) == 1) return(others)
+    ref <- input$protein_ref_group
+    if (is.null(ref) || !ref %in% others) others[1] else ref
+  })
+
   # Per-(isotype, group, position) dataset, reusing the snake summaries
   protein_dataset <- reactive({
     req(protein_info_data())
@@ -567,7 +586,7 @@ server_protein_viz <- function(input, output, session,
 
   output$protein_color_mode_ui <- renderUI({
     isotypes <- protein_isotypes()
-    modes <- c("Expression" = "expr", "Δ groups" = "dgroup")
+    modes <- c("Expression" = "expr", "Δ between groups" = "dgroup")
     if (length(isotypes) >= 2) {
       modes[paste(isotypes[1], "−", isotypes[2])] <- "diso"
     }
@@ -577,6 +596,7 @@ server_protein_viz <- function(input, output, session,
   view <- function() list(
     isotype = isolate(input$protein_isotype) %||% protein_isotypes()[1],
     group   = isolate(input$protein_group) %||% protein_groups()[1],
+    ref     = isolate(reference_group()),
     mode    = isolate(input$protein_color_mode) %||% "expr",
     fdr     = isolate(input$protein_fdr) %||% 0.05,
     surface = isTRUE(isolate(input$protein_show_surface)),
@@ -599,6 +619,7 @@ server_protein_viz <- function(input, output, session,
   observeEvent(protein_dataset(), send_all())
   observeEvent(input$protein_isotype, push_view(), ignoreInit = TRUE)
   observeEvent(input$protein_group, push_view(), ignoreInit = TRUE)
+  observeEvent(input$protein_ref_group, push_view(), ignoreInit = TRUE)
   observeEvent(input$protein_color_mode, push_view(), ignoreInit = TRUE)
   observeEvent(input$protein_fdr, push_view(), ignoreInit = TRUE)
   observeEvent(input$protein_show_surface, push_view(), ignoreInit = TRUE)

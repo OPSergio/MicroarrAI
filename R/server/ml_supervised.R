@@ -26,6 +26,13 @@
 # Last Modified: 2025
 # =============================================================================
 
+
+#' Quote variable names for use inside a model formula
+#'
+#' Formula terms are evaluated as R code, so a column called
+#' `system("...")` would run. Backticks make every name a plain symbol.
+quote_terms <- function(x) paste0("`", gsub("`", "", x), "`")
+
 #' Train model with Cross-Validation and optional RFE
 #'
 #' @description
@@ -231,7 +238,7 @@ train_model_advanced <- function(data,
       message("[SVM] Converting ", sum(factor_cols), " factor column(s) to dummy variables...")
       
       # Create dummy variables using model.matrix
-      formula_str <- paste("~", paste(names(predictors), collapse = " + "), "- 1")
+      formula_str <- paste("~", paste(quote_terms(names(predictors)), collapse = " + "), "- 1")
       dummy_matrix <- model.matrix(as.formula(formula_str), data = predictors)
       
       # Reconstruct data with dummies
@@ -1087,6 +1094,24 @@ prepare_ml_data <- function(data, group_var, id_column = "id", impute_method = "
   ml_data <- ml_data[, vapply(ml_data, function(x) any(!is.na(x)), logical(1)), drop = FALSE]
   ml_data <- impute_missing_mixed(ml_data, method = impute_method)
 
+  # A predictor with a single value carries no information, and a one-level
+  # factor makes caret::train(target ~ .) abort with "contrasts can be applied
+  # only to factors with 2 or more levels". Typical culprits: a constant
+  # clinical column (centre, assay batch) or a factor whose other levels only
+  # occurred in rows dropped above for lacking a label.
+  predictors <- setdiff(names(ml_data), "target")
+  for (nm in predictors) {
+    if (is.factor(ml_data[[nm]])) ml_data[[nm]] <- droplevels(ml_data[[nm]])
+  }
+  constant <- predictors[vapply(ml_data[predictors],
+                                function(x) dplyr::n_distinct(x, na.rm = TRUE) < 2,
+                                logical(1))]
+  if (length(constant) > 0) {
+    message("[ML] Dropping ", length(constant), " constant predictor(s): ",
+            paste(constant, collapse = ", "))
+    ml_data <- ml_data[, setdiff(names(ml_data), constant), drop = FALSE]
+  }
+
   return(ml_data)
 }
 
@@ -1171,7 +1196,7 @@ create_decision_boundary_plot <- function(data, model_type, important_vars,
   }
   
   # Train 2D model based on type
-  formula_2d <- as.formula(paste("target ~", paste(predictors, collapse = " + ")))
+  formula_2d <- as.formula(paste("target ~", paste(quote_terms(predictors), collapse = " + ")))
   
   if (model_type == "c50") {
     # Extract trials parameter or use default

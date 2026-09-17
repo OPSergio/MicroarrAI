@@ -83,6 +83,7 @@ ui_protein_viz <- function() {
         tags$div(style = "padding:10px;",
           uiOutput("protein_isotype_ui"),
           uiOutput("protein_group_ui"),
+          uiOutput("protein_ref_group_ui"),
           uiOutput("protein_color_mode_ui"),
           sliderInput("protein_fdr", "Biomarker FDR ≤", min = 0.001, max = 0.10, value = 0.05, step = 0.001),
           checkboxInput("protein_show_surface", "Molecular surface", FALSE),

@@ -1,8 +1,11 @@
 /* ===========================================================================
  * protein_playground.js — linked 2D(D3) + 3D(3Dmol) protein explorer.
  *
- * One dataset (both isotypes x both groups + per-peptide FDR) drives every view:
- *   Colour by: Expression | Δ(caso−tolerante) | IgE−IgG4
+ * One dataset (every isotype x every clinical group + per-peptide FDR) drives
+ * every view:
+ *   Colour by: Expression | Δ(selected group − reference group) | isotype A − B
+ * Group names come from the dataset; any number of groups is supported, the
+ * reference group being chosen server-side (the other one when there are two).
  *   Biomarkers filtered by an FDR slider.
  * Hovering a residue in the strip / 2D / 3D highlights it everywhere and shows a
  * rich tooltip (full AA name, position, biomarker, fold change, expression, PTM,
@@ -31,7 +34,7 @@
     idx: {}, posInfo: {}, posList: [], disulfides: [], ssPartner: {},
     isotypes: [], groups: [], chain: "A", pdb: null, uniprot: null,
     structureUrl: null, zoom: 1,
-    v: { isotype: "IgE", group: "caso", mode: "expr", fdr: 0.05, surface: false, biomarkers: true },
+    v: { isotype: null, group: null, ref: null, mode: "expr", fdr: 0.05, surface: false, biomarkers: true },
     viewer: null, loadedKey: null, hl: null, seq: null, div: null, lastXY: { x: 0, y: 0 }
   };
   window.PV = PV;
@@ -44,10 +47,7 @@
   function valueAt(pos) {
     const v = PV.v;
     if (v.mode === "expr") return exprOf(v.isotype, v.group, pos);
-    if (v.mode === "dgroup") {
-      const a = exprOf(v.isotype, PV.groups[0], pos), b = exprOf(v.isotype, PV.groups[1], pos);
-      return (a == null || b == null) ? null : a - b;
-    }
+    if (v.mode === "dgroup") return foldChange(pos);
     // diso: difference between the first two isotypes present, whatever they are
     const a = exprOf(PV.isotypes[0], v.group, pos), b = exprOf(PV.isotypes[1], v.group, pos);
     return (a == null || b == null) ? null : a - b;
@@ -94,10 +94,17 @@
     // padj may be absent (real pipeline): then show the selected biomarker regardless
     return PV.v.biomarkers && r && r.is_biomarker && (r.padj == null || r.padj <= PV.v.fdr);
   }
+  // Selected group minus the reference group (null when there is no reference,
+  // i.e. the dataset has a single group).
   function foldChange(pos) {
-    const a = exprOf(PV.v.isotype, PV.groups[0], pos), b = exprOf(PV.v.isotype, PV.groups[1], pos);
+    if (!PV.v.ref) return null;
+    const a = exprOf(PV.v.isotype, PV.v.group, pos), b = exprOf(PV.v.isotype, PV.v.ref, pos);
     return (a == null || b == null) ? null : a - b;
   }
+  // Group / isotype names and UniProt notes come from user data: escape them
+  // before they go into tooltip / legend HTML.
+  const esc = x => String(x).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const groupPair = () => esc(PV.v.group) + " − " + esc(PV.v.ref);
 
   // serpentine layout (port of R posiciones)
   function posiciones(n, altura, pte) {
@@ -126,9 +133,9 @@
     tip().html(
       "<b>" + (AA[info.aa] || info.aa) + " " + pos + "</b>" +
       "<br>Biomarker: " + (isBiomarker(pos) ? ("Yes" + (r && r.padj != null ? " (FDR " + r.padj.toExponential(1) + ")" : "")) : "No") +
-      "<br>Fold change (caso−tol): " + (fc == null ? "NA" : fc.toFixed(2)) +
-      "<br>Expression (" + PV.v.isotype + "/" + PV.v.group + "): " + (r && r.expr != null ? r.expr.toFixed(2) : "NA") +
-      (info.mod ? "<br><span style='color:#e7a6f5'>PTM: " + info.mod + "</span>" : "") +
+      (PV.v.ref ? "<br>Δ (" + groupPair() + "): " + (fc == null ? "NA" : fc.toFixed(2)) : "") +
+      "<br>Expression (" + esc(PV.v.isotype) + "/" + esc(PV.v.group) + "): " + (r && r.expr != null ? r.expr.toFixed(2) : "NA") +
+      (info.mod ? "<br><span style='color:#e7a6f5'>PTM: " + esc(info.mod) + "</span>" : "") +
       (ss ? "<br><span style='color:#ffe08a'>Disulfide ↔ Cys" + ss + "</span>" : "") +
       (info.is_signal ? "<br>Signal peptide" : "")
     ).style("left", (PV.lastXY.x + 14) + "px").style("top", (PV.lastXY.y - 8) + "px")
@@ -241,7 +248,9 @@
     const host = d3.select("#pv-legend").html("");
     const diverging = PV.v.mode !== "expr";
     const w = 150, h = 10, id = "pv-grad";
-    const svg = host.append("svg").attr("width", w + 60).attr("height", 34);
+    // .text() takes raw strings, so no escaping here
+    const title = diverging ? (PV.v.mode === "dgroup" ? PV.v.group + " − " + PV.v.ref : PV.isotypes[0] + "−" + PV.isotypes[1]) : "expr";
+    const svg = host.append("svg").attr("width", w + 30 + 6 * title.length).attr("height", 34);
     const defs = svg.append("defs").append("linearGradient").attr("id", id);
     // Sampled off the live scale, so the bar always shows the ramp actually in
     // use instead of a hand-written approximation of it.
@@ -257,7 +266,7 @@
     [0, w / 2, w].forEach((x, i) => svg.append("text").attr("x", 20 + x).attr("y", 28)
       .attr("text-anchor", "middle").attr("font-size", "10px").attr("fill", "#3a4050").text(lab[i]));
     svg.append("text").attr("x", 20 + w + 6).attr("y", 13).attr("font-size", "10px").attr("fill", "#3a4050")
-      .text(diverging ? (PV.v.mode === "dgroup" ? "Δ groups" : "IgE−IgG4") : "expr");
+      .text(title);
 
     host.append("div").style("margin-top", "4px").style("font-size", "11px").html(
       "<span style='color:" + BM_COL + "'>●</span> biomarker &nbsp;" +

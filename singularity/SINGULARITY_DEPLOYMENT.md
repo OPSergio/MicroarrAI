@@ -59,6 +59,7 @@ mkdir -p logs
 
 # 3. Start the application in the background
 singularity instance start \
+    --containall --no-home --writable-tmpfs \
     --bind ./logs:/var/log/shiny-server \
     MicroarrAI.sif microarrai
 
@@ -117,6 +118,7 @@ apptainer build MicroarrAI.sif singularity/MicroarrAI.def
 ```bash
 mkdir -p logs
 singularity instance start \
+    --containall --no-home --writable-tmpfs \
     --bind ./logs:/var/log/shiny-server \
     MicroarrAI.sif microarrai
 ```
@@ -126,6 +128,7 @@ With persistent data:
 ```bash
 mkdir -p logs data
 singularity instance start \
+    --containall --no-home --writable-tmpfs \
     --bind ./logs:/var/log/shiny-server \
     --bind ./data:/srv/shiny-server/MicroarrAI/data \
     MicroarrAI.sif microarrai
@@ -135,6 +138,7 @@ With custom Shiny Server configuration:
 
 ```bash
 singularity instance start \
+    --containall --no-home --writable-tmpfs \
     --bind ./logs:/var/log/shiny-server \
     --bind ./shiny-server.conf:/etc/shiny-server/shiny-server.conf:ro \
     MicroarrAI.sif microarrai
@@ -197,6 +201,7 @@ Edit `shiny-server-singularity.conf`, change `listen 3838;` to the desired port,
 
 ```bash
 singularity instance start \
+    --containall --no-home --writable-tmpfs \
     --bind ./logs:/var/log/shiny-server \
     --bind ./shiny-server-singularity.conf:/etc/shiny-server/shiny-server.conf:ro \
     MicroarrAI.sif microarrai
@@ -221,6 +226,7 @@ User=$USER
 WorkingDirectory=$(pwd)
 ExecStartPre=/bin/mkdir -p $(pwd)/logs
 ExecStart=$(which singularity) instance start \
+    --containall --no-home --writable-tmpfs \
     --bind $(pwd)/logs:/var/log/shiny-server \
     $(pwd)/MicroarrAI.sif microarrai
 ExecStop=$(which singularity) instance stop microarrai
@@ -255,6 +261,7 @@ mkdir -p logs
 
 # Start the application as a Singularity instance
 singularity instance start \
+    --containall --no-home --writable-tmpfs \
     --bind ./logs:/var/log/shiny-server \
     MicroarrAI.sif microarrai
 

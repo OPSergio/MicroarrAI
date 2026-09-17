@@ -300,7 +300,7 @@ ui_preprocess <- function() {
                   tags$p("Configure your experimental setup:", style = "color: #191c32;"),
                   tags$ul(
                     style = "color: #191c32;",
-                    tags$li(tags$b("Channel labels:"), " Name your antibodies/detection systems (e.g., IgE, IgG4)"),
+                    tags$li(tags$b("Channel labels:"), " Name your antibodies/detection systems (e.g., IgE, IgG4). Untick a channel to analyse only the other one."),
                     tags$li(tags$b("Negative controls:"), " Select spots used for background/normalization (required for Z-score)"),
                     tags$li(tags$b("Positive controls:"), " Optional reference spots for quality assessment")
                   )

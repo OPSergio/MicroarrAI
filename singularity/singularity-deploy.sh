@@ -159,7 +159,16 @@ start_app() {
     # so no host data directory is exposed to the container.
     BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server"
 
+    # --containall / --no-home: by default Singularity also bind-mounts the
+    # host's $HOME, /tmp and the current directory. The app never needs them,
+    # and R evaluates user-supplied content, so keep the container from seeing
+    # anything on the host beyond the logs directory.
+    # --writable-tmpfs: uploads are staged under R's tempdir(), which needs a
+    # writable /tmp once the host one is no longer mounted.
+    ISOLATION_ARGS="--containall --no-home --writable-tmpfs"
+
     ${SINGULARITY_CMD} instance start \
+        $ISOLATION_ARGS \
         $BIND_ARGS \
         "$SIF_FILE" \
         "$INSTANCE_NAME"
@@ -281,7 +290,7 @@ open_shell() {
     print_info "Opening interactive shell inside the container..."
     print_info "(type 'exit' to leave)"
     echo ""
-    ${SINGULARITY_CMD} shell $BIND_ARGS "$SIF_FILE"
+    ${SINGULARITY_CMD} shell --containall --no-home --writable-tmpfs $BIND_ARGS "$SIF_FILE"
 }
 
 cleanup() {
