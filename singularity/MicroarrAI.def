@@ -86,18 +86,20 @@ From: rocker/shiny-verse:4.4.0
 
 # =============================================================================
 # APPLICATION FILES
-# Copied to staging directory /tmp/microarrai_src before %post.
+# Copied to staging directory /opt/microarrai_src before %post.
+# Not under /tmp: the build engine mounts a fresh /tmp during %post, which
+# would hide files staged there.
 # This ensures compatibility with all Singularity/Apptainer versions.
 # Files are moved to their final destination during %post.
 # =============================================================================
 %files
-    www             /tmp/microarrai_src/www
-    Def             /tmp/microarrai_src/Def
-    docs            /tmp/microarrai_src/docs
-    R               /tmp/microarrai_src/R
-    app.R           /tmp/microarrai_src/app.R
-    dependencies.R  /tmp/microarrai_src/dependencies.R
-    singularity/shiny-server-singularity.conf /tmp/microarrai_src/shiny-server.conf
+    www             /opt/microarrai_src/www
+    Def             /opt/microarrai_src/Def
+    docs            /opt/microarrai_src/docs
+    R               /opt/microarrai_src/R
+    app.R           /opt/microarrai_src/app.R
+    dependencies.R  /opt/microarrai_src/dependencies.R
+    singularity/shiny-server-singularity.conf /opt/microarrai_src/shiny-server.conf
 
 # =============================================================================
 # BUILD STEPS
@@ -142,7 +144,7 @@ From: rocker/shiny-verse:4.4.0
     # Single source of truth shared with docker/Dockerfile. No repos= override:
     # the rocker base pins CRAN to a dated Posit Package Manager snapshot, which
     # gives reproducible versions and prebuilt Linux binaries.
-    Rscript /tmp/microarrai_src/dependencies.R install
+    Rscript /opt/microarrai_src/dependencies.R install
 
     # -------------------------------------------------------------------------
     # APPLICATION DEPLOYMENT
@@ -155,18 +157,18 @@ From: rocker/shiny-verse:4.4.0
     mkdir -p /srv/shiny-server/MicroarrAI
 
     # Move files from staging area to final destination
-    cp -r /tmp/microarrai_src/www   /srv/shiny-server/MicroarrAI/www
-    cp -r /tmp/microarrai_src/Def   /srv/shiny-server/MicroarrAI/Def
-    cp -r /tmp/microarrai_src/docs  /srv/shiny-server/MicroarrAI/docs
-    cp -r /tmp/microarrai_src/R     /srv/shiny-server/MicroarrAI/R
-    cp    /tmp/microarrai_src/app.R          /srv/shiny-server/MicroarrAI/app.R
-    cp    /tmp/microarrai_src/dependencies.R /srv/shiny-server/MicroarrAI/dependencies.R
+    cp -r /opt/microarrai_src/www   /srv/shiny-server/MicroarrAI/www
+    cp -r /opt/microarrai_src/Def   /srv/shiny-server/MicroarrAI/Def
+    cp -r /opt/microarrai_src/docs  /srv/shiny-server/MicroarrAI/docs
+    cp -r /opt/microarrai_src/R     /srv/shiny-server/MicroarrAI/R
+    cp    /opt/microarrai_src/app.R          /srv/shiny-server/MicroarrAI/app.R
+    cp    /opt/microarrai_src/dependencies.R /srv/shiny-server/MicroarrAI/dependencies.R
 
     # Deploy Singularity-compatible Shiny Server configuration
-    cp /tmp/microarrai_src/shiny-server.conf /etc/shiny-server/shiny-server.conf
+    cp /opt/microarrai_src/shiny-server.conf /etc/shiny-server/shiny-server.conf
 
     # Clean up staging area
-    rm -rf /tmp/microarrai_src
+    rm -rf /opt/microarrai_src
 
     # -------------------------------------------------------------------------
     # PERMISSIONS
