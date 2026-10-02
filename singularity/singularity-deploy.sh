@@ -23,6 +23,12 @@ INSTANCE_NAME="${APP_NAME}"
 PORT=3838
 LOGS_DIR="$REPO_ROOT/logs"
 TMP_DIR="$REPO_ROOT/tmp"
+STATE_DIR="$REPO_ROOT/state"   # SQLite: telemetry + admin accounts (keep on local disk, not NFS)
+
+# Resource limits for the instance. Override per run, e.g.:
+#   CPUS=4 MEMORY=8G ./singularity-deploy.sh start
+CPUS="${CPUS:-2}"
+MEMORY="${MEMORY:-6G}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -86,6 +92,16 @@ is_running() {
     ${SINGULARITY_CMD} instance list 2>/dev/null | grep -q "^${INSTANCE_NAME} " && return 0 || return 1
 }
 
+# --cpus/--memory are enforced through cgroups. A non-root user needs cgroups
+# v2 for that, so refuse to start unlimited by accident.
+check_cgroups() {
+    if [ "$EUID" -ne 0 ] && [ "$(stat -fc %T /sys/fs/cgroup 2>/dev/null)" != "cgroup2fs" ]; then
+        print_error "Resource limits need cgroups v2, which this host is not using."
+        echo "  Ask the sysadmin to enable it, or run inside a SLURM job (--mem, --cpus-per-task)."
+        return 1
+    fi
+}
+
 prepare_directories() {
     mkdir -p "$LOGS_DIR"
     print_info "Logs directory: $LOGS_DIR"
@@ -93,6 +109,8 @@ prepare_directories() {
     mkdir -p "$TMP_DIR"
     chmod 700 "$TMP_DIR"
     print_info "Temp directory: $TMP_DIR"
+    mkdir -p "$STATE_DIR"
+    chmod 700 "$STATE_DIR"
 }
 
 # -----------------------------------------------------------------------------
@@ -158,6 +176,8 @@ start_app() {
         return 0
     fi
 
+    check_cgroups || return 1
+
     # Drop uploads left behind by sessions killed on the last stop
     rm -rf "${TMP_DIR:?}"/*
 
@@ -168,7 +188,7 @@ start_app() {
     # /tmp must live on disk: uploads are staged under R's tempdir(), and
     # --writable-tmpfs caps it at the 64 MB session tmpfs, which truncates
     # uploads ("problem writing to connection").
-    BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server --bind ${TMP_DIR}:/tmp"
+    BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server --bind ${TMP_DIR}:/tmp --bind ${STATE_DIR}:/var/lib/microarrai"
 
     # --containall / --no-home: by default Singularity also bind-mounts the
     # host's $HOME, /tmp and the current directory. The app never needs them,
@@ -176,11 +196,25 @@ start_app() {
     # anything on the host beyond the bind mounts above.
     ISOLATION_ARGS="--containall --no-home"
 
-    ${SINGULARITY_CMD} instance start \
+    # Every user shares one R process, so without a cap it can take all host
+    # RAM and the kernel OOM killer may pick another service. --memory-swap
+    # equal to --memory disables swap: hitting the cap kills R (users see
+    # "Disconnected") instead of thrashing the machine. OMP_NUM_THREADS stops
+    # XGBoost/OpenMP from spawning one thread per host core inside 2 CPUs.
+    LIMIT_ARGS="--cpus ${CPUS} --memory ${MEMORY} --memory-swap ${MEMORY} --env OMP_NUM_THREADS=${CPUS}"
+    print_info "Limits: ${CPUS} CPUs, ${MEMORY} RAM, no swap"
+
+    if ! ${SINGULARITY_CMD} instance start \
         $ISOLATION_ARGS \
+        $LIMIT_ARGS \
         $BIND_ARGS \
         "$SIF_FILE" \
-        "$INSTANCE_NAME"
+        "$INSTANCE_NAME"; then
+        print_error "Could not start the instance."
+        echo "  If the error mentions cgroups, rootless limits need systemd cgroup delegation"
+        echo "  for your user, or start as root. See SINGULARITY_DEPLOYMENT.md (Resource limits)."
+        exit 1
+    fi
 
     # Esperar a que arranque
     echo ""
@@ -266,6 +300,10 @@ show_status() {
     if is_running; then
         print_success "Instance '$INSTANCE_NAME': RUNNING"
         echo ""
+        print_info "Resource usage (limit: ${CPUS} CPUs, ${MEMORY}):"
+        ${SINGULARITY_CMD} instance stats --no-stream "$INSTANCE_NAME" 2>/dev/null \
+            || echo "  (instance stats not supported by this ${SINGULARITY_CMD} version)"
+        echo ""
         print_info "Checking application health..."
         if curl -sf "http://localhost:${PORT}/MicroarrAI" &>/dev/null; then
             print_success "Shiny Server responding at http://localhost:${PORT}/MicroarrAI"
@@ -294,7 +332,7 @@ open_shell() {
     check_sif_file || return 1
     prepare_directories
 
-    BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server --bind ${TMP_DIR}:/tmp"
+    BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server --bind ${TMP_DIR}:/tmp --bind ${STATE_DIR}:/var/lib/microarrai"
 
     print_info "Opening interactive shell inside the container..."
     print_info "(type 'exit' to leave)"
@@ -329,6 +367,37 @@ cleanup() {
     print_success "Cleanup complete."
 }
 
+# Admin accounts live in ./state (SQLite), managed through the running
+# instance. The password is read silently and passed on stdin, so it never
+# shows up in the process list or the shell history.
+manage_users() {
+    echo ""
+    if ! is_running; then
+        print_error "Start the application first (option 2): accounts are managed inside it."
+        return 1
+    fi
+    local CLI="/srv/shiny-server/MicroarrAI/admin/manage_users.R"
+    echo "  a) Add user / reset password   d) Disable   e) Enable   l) List"
+    read -r -p "  Action: " action
+    case $action in
+        l) ${SINGULARITY_CMD} exec "instance://${INSTANCE_NAME}" Rscript "$CLI" list ;;
+        a)
+            read -r -p "  Username: " user
+            read -r -s -p "  Password (min 8 chars): " pw1; echo ""
+            read -r -s -p "  Repeat password: " pw2; echo ""
+            if [ "$pw1" != "$pw2" ]; then print_error "Passwords do not match."; return 1; fi
+            printf '%s\n' "$pw1" | ${SINGULARITY_CMD} exec "instance://${INSTANCE_NAME}" Rscript "$CLI" add "$user" \
+                && print_success "Admin '$user' ready: https://<server>/MicroarrAI/admin/"
+            ;;
+        d|e)
+            read -r -p "  Username: " user
+            ${SINGULARITY_CMD} exec "instance://${INSTANCE_NAME}" Rscript "$CLI" \
+                "$([ "$action" = d ] && echo disable || echo enable)" "$user"
+            ;;
+        *) print_warn "Unknown action." ;;
+    esac
+}
+
 run_tests() {
     echo ""
     check_sif_file || return 1
@@ -355,6 +424,7 @@ show_menu() {
     echo "  │  7) Open interactive shell                      │"
     echo "  │  8) Run verification tests                      │"
     echo "  │  9) Clean up (stop and remove image)            │"
+    echo "  │  u) Manage admin users                          │"
     echo "  │  0) Exit                                        │"
     echo "  └─────────────────────────────────────────────────┘"
     echo ""
@@ -367,7 +437,7 @@ main() {
 
     while true; do
         show_menu
-        read -r -p "  Option [0-9]: " choice
+        read -r -p "  Option [0-9, u]: " choice
         case $choice in
             1) build_image ;;
             2) start_app ;;
@@ -378,8 +448,9 @@ main() {
             7) open_shell ;;
             8) run_tests ;;
             9) cleanup ;;
+            u) manage_users ;;
             0) echo ""; print_info "Exiting."; echo ""; exit 0 ;;
-            *) print_warn "Invalid option. Choose between 0 and 9." ;;
+            *) print_warn "Invalid option. Choose 0-9 or u." ;;
         esac
     done
 }
@@ -397,8 +468,9 @@ if [ $# -gt 0 ]; then
         shell)   open_shell ;;
         test)    run_tests ;;
         clean)   cleanup ;;
+        users)   manage_users ;;
         *)
-            echo "Usage: $0 [build|start|stop|logs|rebuild|status|shell|test|clean]"
+            echo "Usage: $0 [build|start|stop|logs|rebuild|status|shell|test|clean|users]"
             echo "       $0           (interactive menu)"
             exit 1
             ;;

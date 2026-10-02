@@ -52,6 +52,9 @@ library(ggiraph)      # Interactive ggplot2 graphics
 # -----------------------------------------------------------------------------
 # Data Visualization - 3D
 # -----------------------------------------------------------------------------
+# Headless server: no X display. Without this rgl tries to open one, which
+# can crash or hang the R process; rglwidget() only needs the null device.
+options(rgl.useNULL = TRUE)
 library(rgl)          # 3D visualization and graphics
 library(car)          # 3D ellipsoids and scatter plots
 
@@ -162,6 +165,10 @@ source("R/utils/ui_helpers.R", encoding = "UTF-8")
 
 # Staging of user-uploaded raw scans into a per-session directory
 source("R/utils/upload_staging.R", encoding = "UTF-8")
+
+# Usage telemetry for the admin panel (state database + event logging)
+source("R/utils/state_db.R", encoding = "UTF-8")
+source("R/utils/telemetry.R", encoding = "UTF-8")
 
 # Protein visualization utilities
 source("R/utils/protein_utils.R", encoding = "UTF-8")

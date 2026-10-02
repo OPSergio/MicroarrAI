@@ -20,6 +20,11 @@ CRAN_PACKAGES <- c(
   "dplyr", "tidyr", "tibble", "readr", "purrr", "stringr",
   "readxl", "broom", "rlang", "jsonlite", "openxlsx",
 
+  # State database + admin panel (telemetry, password hashing, timers).
+  # All already in the image via rocker/tidyverse and plotly; listed so the
+  # build check catches it if that ever changes.
+  "DBI", "RSQLite", "openssl", "later", "curl",
+
   # Shiny ecosystem
   "shiny", "shinyWidgets", "shinydashboard", "shinycssloaders", "DT",
   "shinyjs", "shinythemes", "bslib", "rhandsontable", "markdown",

@@ -1,0 +1,81 @@
+/* MicroarrAI admin — METIS look (navy, Cinzel wordmark, green accent) */
+:root {
+  --surface: #151931; --raised: #1c2140; --muted: #7d84a3; --text-2: #b4bad3;
+  --border: rgba(255, 255, 255, 0.08);
+  --good: #0ca30c; --warning: #fab219; --critical: #d03b3b;
+  --log-bg: #0a0c1b;
+}
+body { background: #0d0f22; padding-bottom: 40px; }
+.container-fluid { max-width: 1440px; }
+
+.wordmark { font-family: Cinzel, Georgia, serif; font-weight: 500; letter-spacing: .28em; font-size: 16px; }
+.chip { font-size: 10px; font-weight: 700; letter-spacing: .12em; padding: 3px 7px; border-radius: 999px;
+        background: linear-gradient(90deg, #90EE90, #18BC9C); color: #0d0f22; margin-left: 10px; vertical-align: 2px; }
+.note, .card__sub { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 8px; }
+p.note { margin-left: 0; }
+.pill { border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 4px 12px; font-size: 13px; color: var(--text-2); }
+
+/* login */
+.login { min-height: 90vh; display: grid; place-items: center; }
+.login__card { width: 100%; max-width: 380px; padding: 30px 26px; }
+.login__brand { text-align: center; margin-bottom: 22px; }
+
+/* top bar + tabs */
+.topbar { display: flex; align-items: center; padding: 18px 0 12px; }
+.topbar__right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+.nav-underline { margin-bottom: 18px; }
+.nav-underline .nav-link.active { border-bottom-color: #18BC9C; }
+
+.card { border-radius: 14px; border: 1px solid var(--border); }
+.card-header { background: transparent; font-weight: 600; font-size: 14px; border-bottom: 1px solid var(--border); }
+
+/* KPIs */
+.kpi-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+.kpi { padding: 16px 18px; margin: 0; }
+.kpi__label { color: var(--muted); font-size: 12px; }
+.kpi__value { font-size: 26px; font-weight: 600; margin-top: 4px; line-height: 1.2; }
+.kpi__value .status { font-size: 20px; }
+.kpi__sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+/* status: icon + word, never colour alone */
+.status { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+.status__icon { width: 16px; height: 16px; border-radius: 50%; display: inline-grid; place-items: center;
+                font-size: 10px; font-weight: 800; color: #fff; flex: none; }
+.status--good .status__icon { background: var(--good); }
+.status--warning .status__icon { background: var(--warning); color: #3a2900; }
+.status--critical .status__icon { background: var(--critical); }
+.status--neutral .status__icon { background: #4a5070; }
+
+.comp-list { list-style: none; margin: 0; padding: 0; }
+.comp-list li { display: flex; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.comp-list li:last-child { border-bottom: 0; }
+.comp-list .meta { margin-left: auto; color: var(--muted); font-size: 12px; }
+
+.meter { margin: 10px 0 14px; }
+.meter__row { display: flex; align-items: baseline; font-size: 13px; margin-bottom: 6px; }
+.meter__row .v { margin-left: auto; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.meter__bar { height: 8px; border-radius: 4px; background: #262b4a; overflow: hidden; }
+.meter__bar span { display: block; height: 100%; border-radius: 4px; background: #3987e5; }
+.meter__bar .meter--warning { background: var(--warning); }
+.meter__bar .meter--critical { background: var(--critical); }
+
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 13px; margin: 0; }
+.kv dt { color: var(--muted); font-weight: 400; }
+.kv dd { margin: 0; }
+.trace { background: var(--log-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+         font: 12px/1.6 "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; }
+
+/* logs */
+.log-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+.log-toolbar .log-search { flex: 1; min-width: 180px; }
+.log-toolbar .form-group, .log-toolbar .checkbox { margin: 0; }
+.logview { background: var(--log-bg); border: 1px solid var(--border); border-radius: 10px; height: 62vh;
+           overflow: auto; padding: 8px 0; font: 12px/1.6 "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
+.logline { padding: 0 12px; white-space: pre-wrap; word-break: break-word; }
+.logline.err { background: rgba(208, 59, 59, .14); box-shadow: inset 3px 0 0 var(--critical); }
+.logline.warn { box-shadow: inset 3px 0 0 var(--warning); }
+select[size] { font: 11.5px/1.5 ui-monospace, Menlo, Consolas, monospace; background: var(--log-bg); color: #eef1f8; }
+
+table.dataTable { font-size: 13px; }
+
+@media (max-width: 1100px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

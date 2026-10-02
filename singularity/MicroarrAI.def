@@ -88,6 +88,12 @@ From: rocker/shiny-verse:4.4.0
     export TZ=UTC
     # Upload ceiling for a whole scan set; see R/global.R
     export MICROARRAI_MAX_UPLOAD_MB=1024
+    # No X display in the container: rgl must use its null device
+    export RGL_USE_NULL=TRUE
+    # Font cache for ggiraph/systemfonts: there is no $HOME in the container
+    export XDG_CACHE_HOME=/tmp/.cache
+    # Telemetry + admin accounts (bind-mounted from ./state by the deploy script)
+    export MICROARRAI_STATE_DIR=/var/lib/microarrai
 
 # =============================================================================
 # APPLICATION FILES
@@ -102,6 +108,7 @@ From: rocker/shiny-verse:4.4.0
     Def             /opt/microarrai_src/Def
     docs            /opt/microarrai_src/docs
     R               /opt/microarrai_src/R
+    admin           /opt/microarrai_src/admin
     app.R           /opt/microarrai_src/app.R
     dependencies.R  /opt/microarrai_src/dependencies.R
     singularity/shiny-server-singularity.conf /opt/microarrai_src/shiny-server.conf
@@ -130,6 +137,8 @@ From: rocker/shiny-verse:4.4.0
         libtiff5-dev \
         libjpeg-dev \
         libfontconfig1-dev \
+        fontconfig \
+        fonts-liberation \
         libharfbuzz-dev \
         libfribidi-dev \
         libglpk-dev \
@@ -166,6 +175,7 @@ From: rocker/shiny-verse:4.4.0
     cp -r /opt/microarrai_src/Def   /srv/shiny-server/MicroarrAI/Def
     cp -r /opt/microarrai_src/docs  /srv/shiny-server/MicroarrAI/docs
     cp -r /opt/microarrai_src/R     /srv/shiny-server/MicroarrAI/R
+    cp -r /opt/microarrai_src/admin /srv/shiny-server/MicroarrAI/admin
     cp    /opt/microarrai_src/app.R          /srv/shiny-server/MicroarrAI/app.R
     cp    /opt/microarrai_src/dependencies.R /srv/shiny-server/MicroarrAI/dependencies.R
 
@@ -178,7 +188,7 @@ From: rocker/shiny-verse:4.4.0
     # -------------------------------------------------------------------------
     # PERMISSIONS
     # -------------------------------------------------------------------------
-    mkdir -p /var/log/shiny-server
+    mkdir -p /var/log/shiny-server /var/lib/microarrai
     chown -R shiny:shiny /srv/shiny-server/MicroarrAI
     chown -R shiny:shiny /var/log/shiny-server
     chmod -R 755 /srv/shiny-server/MicroarrAI
@@ -194,7 +204,9 @@ From: rocker/shiny-verse:4.4.0
 
 # Used with: singularity instance start MicroarrAI.sif <name>
 %startscript
-    exec /usr/bin/shiny-server
+    # Shiny Server's own log (worker crashes, proxy errors) goes next to the
+    # app logs, so the admin panel and ./logs on the host can show it
+    exec /usr/bin/shiny-server >> /var/log/shiny-server/shiny-server.log 2>&1
 
 # =============================================================================
 # POST-BUILD VERIFICATION
@@ -211,7 +223,7 @@ From: rocker/shiny-verse:4.4.0
             && echo "$f: OK" \
             || (echo "$f: MISSING" && exit 1)
     done
-    for d in www Def docs R; do
+    for d in www Def docs R admin; do
         test -d /srv/shiny-server/MicroarrAI/$d \
             && echo "$d/: OK" \
             || (echo "$d/: MISSING" && exit 1)
@@ -221,6 +233,10 @@ From: rocker/shiny-verse:4.4.0
     Rscript -e "invisible(parse('/srv/shiny-server/MicroarrAI/app.R'))" \
         && echo "app.R parses: OK" \
         || (echo "app.R FAILED to parse" && exit 1)
+
+    Rscript -e "invisible(parse('/srv/shiny-server/MicroarrAI/admin/app.R'))" \
+        && echo "admin/app.R parses: OK" \
+        || (echo "admin/app.R FAILED to parse" && exit 1)
 
     echo "=== Checking Shiny Server configuration ==="
     test -f /etc/shiny-server/shiny-server.conf \

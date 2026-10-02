@@ -60,6 +60,7 @@ mkdir -p logs tmp
 # 3. Start the application in the background
 singularity instance start \
     --containall --no-home \
+    --cpus 2 --memory 6G --memory-swap 6G --env OMP_NUM_THREADS=2 \
     --bind ./logs:/var/log/shiny-server \
     --bind ./tmp:/tmp \
     MicroarrAI.sif microarrai
@@ -120,6 +121,7 @@ apptainer build MicroarrAI.sif singularity/MicroarrAI.def
 mkdir -p logs tmp
 singularity instance start \
     --containall --no-home \
+    --cpus 2 --memory 6G --memory-swap 6G --env OMP_NUM_THREADS=2 \
     --bind ./logs:/var/log/shiny-server \
     --bind ./tmp:/tmp \
     MicroarrAI.sif microarrai
@@ -131,6 +133,7 @@ With persistent data:
 mkdir -p logs tmp data
 singularity instance start \
     --containall --no-home \
+    --cpus 2 --memory 6G --memory-swap 6G --env OMP_NUM_THREADS=2 \
     --bind ./logs:/var/log/shiny-server \
     --bind ./tmp:/tmp \
     --bind ./data:/srv/shiny-server/MicroarrAI/data \
@@ -142,6 +145,7 @@ With custom Shiny Server configuration:
 ```bash
 singularity instance start \
     --containall --no-home \
+    --cpus 2 --memory 6G --memory-swap 6G --env OMP_NUM_THREADS=2 \
     --bind ./logs:/var/log/shiny-server \
     --bind ./tmp:/tmp \
     --bind ./shiny-server.conf:/etc/shiny-server/shiny-server.conf:ro \
@@ -188,6 +192,80 @@ singularity exec MicroarrAI.sif R --no-save -e "sessionInfo()"
 
 ---
 
+## Resource limits
+
+Shiny Server (open source) runs **one R process shared by every user**. Without
+limits it can take all the host's RAM; the kernel OOM killer then kills the
+largest process — usually that R process (every user sees "Disconnected") but
+possibly another service on the host. `singularity-deploy.sh` therefore starts
+the instance with **2 CPUs and 6 GB RAM, no swap** by default:
+
+```bash
+singularity instance start \
+    --containall --no-home \
+    --cpus 2 --memory 6G --memory-swap 6G --env OMP_NUM_THREADS=2 \
+    --bind ./logs:/var/log/shiny-server \
+    --bind ./tmp:/tmp \
+    MicroarrAI.sif microarrai
+
+# Other values with the script:
+CPUS=4 MEMORY=8G ./singularity/singularity-deploy.sh start
+```
+
+- `--memory-swap` equal to `--memory` disables swap: at the cap R is killed
+  instead of the machine thrashing.
+- `OMP_NUM_THREADS` keeps XGBoost/OpenMP from starting one thread per host core.
+- Requirements: as root, any cgroups version. As a normal user, **cgroups v2**
+  (`stat -fc %T /sys/fs/cgroup` prints `cgroup2fs`) with systemd delegating
+  the cpu/memory controllers to the user. If `instance start` fails with a
+  cgroups error, ask the sysadmin for delegation or start as root.
+- Check usage against the limit: `singularity instance stats --no-stream microarrai`.
+- Disk is not limited by cgroups: keep `./tmp` on a partition other than `/`.
+- Inside SLURM, the job's `--mem` / `--cpus-per-task` already apply.
+
+---
+
+## Admin panel
+
+A separate Shiny app (own R process, so it stays responsive while the main app
+is busy) served at **`/MicroarrAI/admin/`**, e.g.
+`https://bioinfo.irycis.org/MicroarrAI/admin/`. It shows whether the app
+responds, memory against the limit, crashes (an R process that died with users
+connected, plus what it was doing), R errors from the logs and a live log tail.
+
+- **Data**: `./state/microarrai.sqlite` on the host, mounted at
+  `/var/lib/microarrai`. The main app writes usage events and a memory sample
+  every 30 s; uploaded data is never recorded. Keep `./state` on local disk
+  (SQLite misbehaves on NFS) and back it up with
+  `sqlite3 state/microarrai.sqlite ".backup backup.sqlite"`.
+- **Admin accounts** are rows in that database (salted `bcrypt_pbkdf` hashes),
+  never in the image or in environment variables. With the instance running:
+
+  ```bash
+  ./singularity/singularity-deploy.sh users   # add / reset password, disable, enable, list
+  ```
+
+  5 failed logins lock that user and IP for 15 minutes; idle sessions close
+  after 30 minutes; every login and account change is in the Auditoría tab.
+- **Proxy**: the existing `/MicroarrAI` rule already routes `/MicroarrAI/admin`.
+  Restricting it to the internal network/VPN in HAProxy is recommended. The
+  live log tab uses the websocket: keep `timeout tunnel` long (e.g. `1h`).
+- **Logs**: `preserve_logs` is on, so every R process log is kept in `./logs`
+  (including Shiny Server's own `shiny-server.log`). Purge old ones by hand
+  until the panel's maintenance tab exists.
+
+### Tests (no Singularity needed)
+
+```bash
+Rscript tests/run_tests.R     # from the repo root; needs testthat + withr
+```
+
+Unit and functional tests (the admin server driven with `shiny::testServer`,
+the live log tail, the account CLI as a subprocess) run against throw-away
+state and log directories.
+
+---
+
 ## Change Port
 
 The image listens on port **3838** by default. Singularity does not remap ports like Docker (`-p 8080:3838`). To change the port you have two options:
@@ -206,6 +284,7 @@ Edit `shiny-server-singularity.conf`, change `listen 3838;` to the desired port,
 ```bash
 singularity instance start \
     --containall --no-home \
+    --cpus 2 --memory 6G --memory-swap 6G --env OMP_NUM_THREADS=2 \
     --bind ./logs:/var/log/shiny-server \
     --bind ./tmp:/tmp \
     --bind ./shiny-server-singularity.conf:/etc/shiny-server/shiny-server.conf:ro \
@@ -232,6 +311,7 @@ WorkingDirectory=$(pwd)
 ExecStartPre=/bin/mkdir -p $(pwd)/logs $(pwd)/tmp
 ExecStart=$(which singularity) instance start \
     --containall --no-home \
+    --cpus 2 --memory 6G --memory-swap 6G --env OMP_NUM_THREADS=2 \
     --bind $(pwd)/logs:/var/log/shiny-server \
     --bind $(pwd)/tmp:/tmp \
     $(pwd)/MicroarrAI.sif microarrai
@@ -268,6 +348,7 @@ mkdir -p logs tmp
 # Start the application as a Singularity instance
 singularity instance start \
     --containall --no-home \
+    --cpus 2 --memory 6G --memory-swap 6G --env OMP_NUM_THREADS=2 \
     --bind ./logs:/var/log/shiny-server \
     --bind ./tmp:/tmp \
     MicroarrAI.sif microarrai

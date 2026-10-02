@@ -132,8 +132,11 @@ create_3d_scatter <- function(x, y, z, groups,
     sphere.size = 1.5
   )
   
-  # Return rglwidget for Shiny
-  return(rgl::rglwidget())
+  # Capture the scene as a widget, then close the device: every render opens
+  # a new one, and leaving them open leaks memory until the process is killed
+  widget <- rgl::rglwidget()
+  rgl::close3d()
+  widget
 }
 
 

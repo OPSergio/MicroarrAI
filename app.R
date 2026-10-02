@@ -60,6 +60,9 @@ ui <- fluidPage(
 
 server <- function(input, output, session){
 
+  # ===== Usage telemetry (read by the admin panel) =====
+  telemetry_attach(input, session)
+
   # ===== Glass navbar -> tab switching =====
   observeEvent(input$nav_target, {
     updateTabsetPanel(session, "main_tabs", selected = input$nav_target)
