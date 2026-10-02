@@ -22,6 +22,7 @@ DEF_FILE="$SCRIPT_DIR/MicroarrAI.def"
 INSTANCE_NAME="${APP_NAME}"
 PORT=3838
 LOGS_DIR="$REPO_ROOT/logs"
+TMP_DIR="$REPO_ROOT/tmp"
 
 # Colors for output
 RED='\033[0;31m'
@@ -88,6 +89,10 @@ is_running() {
 prepare_directories() {
     mkdir -p "$LOGS_DIR"
     print_info "Logs directory: $LOGS_DIR"
+    # Container /tmp, private to the invoking user
+    mkdir -p "$TMP_DIR"
+    chmod 700 "$TMP_DIR"
+    print_info "Temp directory: $TMP_DIR"
 }
 
 # -----------------------------------------------------------------------------
@@ -153,19 +158,23 @@ start_app() {
         return 0
     fi
 
+    # Drop uploads left behind by sessions killed on the last stop
+    rm -rf "${TMP_DIR:?}"/*
+
     print_info "Starting instance '$INSTANCE_NAME'..."
 
-    # Only logs are bind-mounted: users upload their scans through the browser,
-    # so no host data directory is exposed to the container.
-    BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server"
+    # Only logs and a private /tmp are bind-mounted: users upload their scans
+    # through the browser, so no host data directory is exposed.
+    # /tmp must live on disk: uploads are staged under R's tempdir(), and
+    # --writable-tmpfs caps it at the 64 MB session tmpfs, which truncates
+    # uploads ("problem writing to connection").
+    BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server --bind ${TMP_DIR}:/tmp"
 
     # --containall / --no-home: by default Singularity also bind-mounts the
     # host's $HOME, /tmp and the current directory. The app never needs them,
     # and R evaluates user-supplied content, so keep the container from seeing
-    # anything on the host beyond the logs directory.
-    # --writable-tmpfs: uploads are staged under R's tempdir(), which needs a
-    # writable /tmp once the host one is no longer mounted.
-    ISOLATION_ARGS="--containall --no-home --writable-tmpfs"
+    # anything on the host beyond the bind mounts above.
+    ISOLATION_ARGS="--containall --no-home"
 
     ${SINGULARITY_CMD} instance start \
         $ISOLATION_ARGS \
@@ -285,12 +294,12 @@ open_shell() {
     check_sif_file || return 1
     prepare_directories
 
-    BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server"
+    BIND_ARGS="--bind ${LOGS_DIR}:/var/log/shiny-server --bind ${TMP_DIR}:/tmp"
 
     print_info "Opening interactive shell inside the container..."
     print_info "(type 'exit' to leave)"
     echo ""
-    ${SINGULARITY_CMD} shell --containall --no-home --writable-tmpfs $BIND_ARGS "$SIF_FILE"
+    ${SINGULARITY_CMD} shell --containall --no-home $BIND_ARGS "$SIF_FILE"
 }
 
 cleanup() {

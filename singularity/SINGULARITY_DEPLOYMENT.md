@@ -55,12 +55,13 @@ sudo singularity build MicroarrAI.sif singularity/MicroarrAI.def
 singularity build --fakeroot MicroarrAI.sif singularity/MicroarrAI.def
 
 # 2. Create logs directory
-mkdir -p logs
+mkdir -p logs tmp
 
 # 3. Start the application in the background
 singularity instance start \
-    --containall --no-home --writable-tmpfs \
+    --containall --no-home \
     --bind ./logs:/var/log/shiny-server \
+    --bind ./tmp:/tmp \
     MicroarrAI.sif microarrai
 
 # 4. Access in the browser
@@ -116,20 +117,22 @@ apptainer build MicroarrAI.sif singularity/MicroarrAI.def
 ### Start (equivalent to `docker-compose up -d`)
 
 ```bash
-mkdir -p logs
+mkdir -p logs tmp
 singularity instance start \
-    --containall --no-home --writable-tmpfs \
+    --containall --no-home \
     --bind ./logs:/var/log/shiny-server \
+    --bind ./tmp:/tmp \
     MicroarrAI.sif microarrai
 ```
 
 With persistent data:
 
 ```bash
-mkdir -p logs data
+mkdir -p logs tmp data
 singularity instance start \
-    --containall --no-home --writable-tmpfs \
+    --containall --no-home \
     --bind ./logs:/var/log/shiny-server \
+    --bind ./tmp:/tmp \
     --bind ./data:/srv/shiny-server/MicroarrAI/data \
     MicroarrAI.sif microarrai
 ```
@@ -138,8 +141,9 @@ With custom Shiny Server configuration:
 
 ```bash
 singularity instance start \
-    --containall --no-home --writable-tmpfs \
+    --containall --no-home \
     --bind ./logs:/var/log/shiny-server \
+    --bind ./tmp:/tmp \
     --bind ./shiny-server.conf:/etc/shiny-server/shiny-server.conf:ro \
     MicroarrAI.sif microarrai
 ```
@@ -201,8 +205,9 @@ Edit `shiny-server-singularity.conf`, change `listen 3838;` to the desired port,
 
 ```bash
 singularity instance start \
-    --containall --no-home --writable-tmpfs \
+    --containall --no-home \
     --bind ./logs:/var/log/shiny-server \
+    --bind ./tmp:/tmp \
     --bind ./shiny-server-singularity.conf:/etc/shiny-server/shiny-server.conf:ro \
     MicroarrAI.sif microarrai
 ```
@@ -224,10 +229,11 @@ After=network.target
 Type=forking
 User=$USER
 WorkingDirectory=$(pwd)
-ExecStartPre=/bin/mkdir -p $(pwd)/logs
+ExecStartPre=/bin/mkdir -p $(pwd)/logs $(pwd)/tmp
 ExecStart=$(which singularity) instance start \
-    --containall --no-home --writable-tmpfs \
+    --containall --no-home \
     --bind $(pwd)/logs:/var/log/shiny-server \
+    --bind $(pwd)/tmp:/tmp \
     $(pwd)/MicroarrAI.sif microarrai
 ExecStop=$(which singularity) instance stop microarrai
 Restart=on-failure
@@ -257,12 +263,13 @@ sudo systemctl status microarrai
 #SBATCH --time=24:00:00
 
 cd $SLURM_SUBMIT_DIR
-mkdir -p logs
+mkdir -p logs tmp
 
 # Start the application as a Singularity instance
 singularity instance start \
-    --containall --no-home --writable-tmpfs \
+    --containall --no-home \
     --bind ./logs:/var/log/shiny-server \
+    --bind ./tmp:/tmp \
     MicroarrAI.sif microarrai
 
 echo "MicroarrAI available at: http://$(hostname):3838/MicroarrAI"

@@ -14,12 +14,15 @@
 #   sudo singularity build MicroarrAI.sif singularity/MicroarrAI.def
 #
 # RUN (background instance):
+#   mkdir -p logs tmp
 #   singularity instance start \
-#       --containall --no-home --writable-tmpfs \
+#       --containall --no-home \
 #       --bind ./logs:/var/log/shiny-server \
+#       --bind ./tmp:/tmp \
 #       MicroarrAI.sif microarrai
 #   (--containall/--no-home keep the host's $HOME, /tmp and CWD out of the
-#    container; --writable-tmpfs gives R a private /tmp for upload staging)
+#    container; ./tmp gives R a private on-disk /tmp for upload staging.
+#    Don't use --writable-tmpfs: its 64 MB cap truncates uploads)
 #
 # ACCESS:
 #   http://localhost:3838/MicroarrAI
@@ -49,10 +52,11 @@ From: rocker/shiny-verse:4.4.0
       sudo singularity build MicroarrAI.sif singularity/MicroarrAI.def
 
     Start in background:
-      mkdir -p logs
+      mkdir -p logs tmp
       singularity instance start \
-          --containall --no-home --writable-tmpfs \
+          --containall --no-home \
           --bind ./logs:/var/log/shiny-server \
+          --bind ./tmp:/tmp \
           MicroarrAI.sif microarrai
 
     Access the application:
@@ -70,8 +74,9 @@ From: rocker/shiny-verse:4.4.0
       singularity instance stop microarrai
 
     Open a shell inside the container:
-      singularity shell --containall --no-home --writable-tmpfs \
-          --bind ./logs:/var/log/shiny-server MicroarrAI.sif
+      singularity shell --containall --no-home \
+          --bind ./logs:/var/log/shiny-server \
+          --bind ./tmp:/tmp MicroarrAI.sif
 
 # =============================================================================
 # ENVIRONMENT VARIABLES
