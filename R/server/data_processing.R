@@ -6,35 +6,49 @@
 # Documentation: docs/data_processing.md
 # ============================================================================
 
-#' Array file extensions the reader accepts
-ARRAY_FILE_PATTERN <- "\\.(csv|txt|gpr)$"
+#' Array file extensions the reader accepts (matched case-insensitively)
+ARRAY_FILE_PATTERN <- "\\.(csv|txt|tsv|gpr)$"
+
+#' Array files in a directory, whatever the case of their extension (.GPR)
+list_array_files <- function(dir) {
+  list.files(dir, pattern = ARRAY_FILE_PATTERN, full.names = TRUE, ignore.case = TRUE)
+}
 
 
 #' Locate Header Row and Field Separator
 #'
 #' @param file_path Character. Full path to the array file
-#' @return List with `skip` (rows to skip) and `sep` (field separator)
+#' @return List with `skip` (rows to skip), `sep` (field separator), `atf`
+#'   (TRUE for ATF / .gpr files, whose flags follow the GenePix convention) and
+#'   `encoding` ("UTF-8" when the bytes are valid UTF-8, e.g. Mapix .gpr with
+#'   "caseína"; "latin1" otherwise, e.g. ScanArray's "R²")
 #' @details
-#' ATF files (GenePix .gpr / .txt exports) declare their own header length on
-#' line 2, so there is nothing to guess. Otherwise the header is the first row
-#' containing an exact "ID" field, tried as comma- then tab-separated.
+#' ATF files (.gpr from GenePix, Mapix/InnoScan and other scanners) declare
+#' their header length on line 2; the row after it must hold the "ID" column.
+#' Scanners don't always count their header lines the same way, so when that
+#' row isn't there the header is searched for like in any other file: the first
+#' row with an exact "ID" field, tried as comma- then tab-separated. Field
+#' names may be quoted ("ID") or not.
 detect_array_header <- function(file_path) {
   lines <- readLines(file_path, n = 200, warn = FALSE, encoding = "latin1")
+  atf <- length(lines) >= 2 && startsWith(lines[1], "ATF")
+  bytes <- readBin(file_path, "raw", file.size(file_path))
+  encoding <- if (validUTF8(rawToChar(bytes[bytes != as.raw(0)]))) "UTF-8" else "latin1"
+  fields <- function(line, sep) trimws(gsub('"', '', strsplit(line, sep, fixed = TRUE)[[1]]))
 
-  if (length(lines) >= 2 && startsWith(lines[1], "ATF")) {
+  if (atf) {
     declared <- suppressWarnings(as.integer(strsplit(lines[2], "\t")[[1]][1]))
-    if (!is.na(declared)) {
-      return(list(skip = declared + 2, sep = "\t"))
+    row <- declared + 3
+    if (!is.na(declared) && row <= length(lines) && "ID" %in% fields(lines[row], "\t")) {
+      return(list(skip = row - 1, sep = "\t", atf = TRUE, encoding = encoding))
     }
   }
 
   for (sep in c(",", "\t")) {
-    has_id <- vapply(lines, function(line) {
-      "ID" %in% trimws(gsub('"', '', strsplit(line, sep, fixed = TRUE)[[1]]))
-    }, logical(1))
-    header_row <- which(has_id)[1]
+    has_id <- vapply(lines, function(line) "ID" %in% fields(line, sep), logical(1))
+    header_row <- unname(which(has_id)[1])
     if (!is.na(header_row)) {
-      return(list(skip = header_row - 1, sep = sep))
+      return(list(skip = header_row - 1, sep = sep, atf = atf, encoding = encoding))
     }
   }
 
@@ -81,6 +95,21 @@ detect_array_channels <- function(cols) {
 }
 
 
+#' Channels Without Signal
+#'
+#' @param df Array data frame as read from the file
+#' @return Channel tokens whose foreground is <= 1 in at least 90 % of spots:
+#'   a laser scanned at PMT gain 0 (Mapix "PMTGain=0, 40") still gets columns,
+#'   but its controls have no variance and Z-score normalization would stop.
+silent_array_channels <- function(df) {
+  channels <- detect_array_channels(names(df))
+  silent <- vapply(channels$fg, function(col) {
+    mean(suppressWarnings(as.numeric(df[[col]])) <= 1, na.rm = TRUE) >= 0.9
+  }, logical(1))
+  channels$channel[silent]
+}
+
+
 #' Clean Analyte IDs
 #' 
 #' Standardizes analyte identifiers for consistent downstream processing
@@ -114,7 +143,11 @@ clean_analyte_ids <- function(ids) {
 #' Read and Process Single Microarray File
 #'
 #' @param file_path Character. Full path to the array file (.csv, .txt, .gpr)
-#' @param flag_threshold Integer. Maximum flag value to keep (default: 4)
+#' @param flag_threshold Integer. ScanArray-style flags: keep spots below this
+#'   value (default: 4). GenePix-style flags (every .gpr, or any file with
+#'   negative flags) instead drop only -100 (bad) and -75 (absent: not printed)
+#'   and keep 100 (good), 0 and -50 ("not found" = no detectable signal: a
+#'   non-reactive peptide, and every blank/PBS negative control).
 #' @param spot_metric Character. "ratio" for log2(signal/background) or
 #'   "difference" for background-corrected foreground
 #' @return Tibble in long format: ID (cleaned), channel, Expression
@@ -134,12 +167,15 @@ read_microarray_file <- function(file_path,
 
   df <- utils::read.delim(file_path, sep = header$sep, skip = header$skip,
                           check.names = FALSE, stringsAsFactors = FALSE,
-                          fileEncoding = "latin1")
+                          fileEncoding = header$encoding)
 
   channels <- detect_array_channels(names(df))
 
   if ("Flags" %in% names(df)) {
-    df <- df[as.numeric(df$Flags) < flag_threshold, , drop = FALSE]
+    flags <- suppressWarnings(as.numeric(df$Flags))
+    genepix_flags <- header$atf || any(flags < 0, na.rm = TRUE)
+    keep <- if (genepix_flags) flags > -75 else flags < flag_threshold
+    df <- df[!is.na(keep) & keep, , drop = FALSE]
   }
 
   ids <- clean_analyte_ids(df[["ID"]])
@@ -159,10 +195,14 @@ read_microarray_file <- function(file_path,
 
     # Quality columns the scanner already computes; richer than the flag alone
     # and what the QC tab needs to spot dust, gradients and saturation.
-    snr_col <- grep(paste0("^(Ch)?", channels$channel[i], ".*(SignalNoiseRatio|SNR)"),
-                    names(df), value = TRUE)
-    sat_col <- grep(paste0("^(Ch)?", channels$channel[i], ".*Sat"),
-                    names(df), value = TRUE)
+    # The channel number sits anywhere in the name: "Ch1 SignalNoiseRatio"
+    # (ScanArray), "SNR 532" / "F635 % Sat." (.gpr).
+    channel_cols <- function(keyword) {
+      hit <- grep(keyword, names(df), value = TRUE)
+      hit[grepl(paste0("(^|[^0-9])", channels$channel[i], "([^0-9]|$)"), hit)]
+    }
+    snr_col <- channel_cols("SignalNoiseRatio|SNR")
+    sat_col <- channel_cols("Sat")
 
     dplyr::mutate(spot,
       signal    = fg,

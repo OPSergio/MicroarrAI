@@ -126,7 +126,7 @@ ui_preprocess <- function() {
                 tags$p("Choose how you want to provide your expression data:", style = "color: #191c32;"),
                 tags$ul(
                   style = "color: #191c32;",
-                  tags$li(tags$b("RAW microarray files:"), " Process GenePix scanner output (CSV files). This gives you full control over normalization and quality filters."),
+                  tags$li(tags$b("RAW microarray files:"), " Process scanner output (.gpr, .csv or .txt files). This gives you full control over normalization and quality filters."),
                   tags$li(tags$b("Processed matrix:"), " Upload pre-normalized data. Skip normalization if you've already processed your data externally.")
                 )
               )
@@ -191,7 +191,7 @@ ui_preprocess <- function() {
                     buttonLabel = "Browse...",
                     label = dark_label("Upload GenePix scan files:"),
                     multiple = TRUE,
-                    accept = c(".csv", ".txt", ".tsv"),
+                    accept = c(".gpr", ".csv", ".txt", ".tsv"),
                     placeholder = "No files selected"
                   ),
                   uiOutput("folder_status")

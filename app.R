@@ -118,7 +118,7 @@ server <- function(input, output, session){
       tags$div(
         style = "background: #d4edda; padding: 15px; border-radius: 8px; border-left: 4px solid #28a745;",
         tags$h6(icon("check-circle"), " RAW Mode Selected", style = "color: #155724; margin-bottom: 10px;"),
-        tags$p("You will process GenePix CSV files with full normalization control.", 
+        tags$p("You will process scanner files (.gpr, .csv, .txt) with full normalization control.", 
               style = "color: #155724; margin: 0;")
       )
     } else {
@@ -136,7 +136,7 @@ server <- function(input, output, session){
     if (input$input_mode == "raw") {
       tagList(
         tags$h5(icon("info-circle"), " Load RAW GenePix Files", style = "color: #191c32; margin-bottom: 10px;"),
-        tags$p("Select the folder containing your GenePix CSV output files.", style = "color: #191c32;"),
+        tags$p("Upload the scanner output files: GenePix / Mapix .gpr, or .csv / .txt exports.", style = "color: #191c32;"),
         tags$p(tags$b("What happens next:"), style = "color: #191c32;"),
         tags$ul(
           style = "color: #191c32;",
@@ -169,7 +169,7 @@ server <- function(input, output, session){
               style = "color: #6c757d; font-style: italic;")
       )
     } else {
-      files <- list.files(path = path1(), pattern = ARRAY_FILE_PATTERN, full.names = TRUE)
+      files <- list_array_files(path1())
       tags$div(
         style = "margin-top: 15px; background: #d4edda; padding: 15px; border-radius: 8px; border-left: 4px solid #28a745;",
         tags$h6(icon("check-circle"), " Files Uploaded Successfully!",
@@ -210,17 +210,19 @@ output$normalization_method_description <- renderUI({
   })
   
   # ===== Channels present in the loaded folder =====
-  detected_channels <- reactive({
+  # The first file's columns name the channels; its values tell which ones
+  # actually carry signal (a laser at gain 0 still exports its columns)
+  first_array <- reactive({
     req(input$input_mode == "raw", path1())
-    files <- list.files(path = path1(), pattern = ARRAY_FILE_PATTERN, full.names = TRUE)
+    files <- list_array_files(path1())
     req(length(files) > 0)
 
     header <- detect_array_header(files[1])
-    cols <- names(utils::read.delim(files[1], sep = header$sep, skip = header$skip,
-                                    check.names = FALSE, nrows = 1,
-                                    fileEncoding = "latin1"))
-    detect_array_channels(cols)$channel
+    utils::read.delim(files[1], sep = header$sep, skip = header$skip,
+                      check.names = FALSE, fileEncoding = header$encoding)
   })
+  detected_channels <- reactive(detect_array_channels(names(first_array()))$channel)
+  silent_channels <- reactive(silent_array_channels(first_array()))
 
   channel_labels <- reactive({
     channels <- detected_channels()
@@ -243,6 +245,8 @@ output$normalization_method_description <- renderUI({
 
   output$channel_labels_ui <- renderUI({
     channels <- detected_channels()
+    silent <- intersect(silent_channels(), channels)
+    if (length(silent) == length(channels)) silent <- character(0)  # nothing to choose
     legacy <- c("IgE", "IgG4")
 
     tagList(
@@ -254,7 +258,12 @@ output$normalization_method_description <- renderUI({
       if (length(channels) > 1) checkboxGroupInput(
         "use_channels", dark_label("Channels to analyse:"),
         choices = stats::setNames(channels, paste0("Channel ", channels)),
-        selected = channels, inline = TRUE
+        selected = setdiff(channels, silent), inline = TRUE
+      ),
+      if (length(silent) > 0) tags$p(
+        sprintf("Channel %s has no signal in these files (scanned at gain 0?) and starts unticked.",
+                paste(silent, collapse = ", ")),
+        style = "color: #8a6d3b; font-size: 13px; margin: -6px 0 12px;"
       ),
       lapply(seq_along(channels), function(i) {
         textInput(
@@ -271,7 +280,7 @@ output$normalization_method_description <- renderUI({
     req(input$input_mode == "raw")
     req(path1())
 
-    files <- list.files(path = path1(), pattern = ARRAY_FILE_PATTERN, full.names = TRUE)
+    files <- list_array_files(path1())
     if (length(files) > 0) {
       # Show processing notification
       showNotification("Extracting analyte IDs from files...", type = "message", duration = 2)
@@ -534,7 +543,7 @@ output$normalization_method_description <- renderUI({
       return()
     }
     
-    files <- list.files(path = path1(), pattern = ARRAY_FILE_PATTERN, full.names = TRUE)
+    files <- list_array_files(path1())
     
     use_channels <- selected_channels()
     if (length(use_channels) == 0) {
