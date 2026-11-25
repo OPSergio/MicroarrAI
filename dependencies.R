@@ -18,7 +18,7 @@
 CRAN_PACKAGES <- c(
   # Data manipulation and I/O
   "dplyr", "tidyr", "tibble", "readr", "purrr", "stringr",
-  "readxl", "broom", "rlang", "jsonlite", "openxlsx",
+  "readxl", "broom", "rlang", "jsonlite", "openxlsx", "png", "base64enc",
 
   # State database + admin panel (telemetry, password hashing, timers).
   # All already in the image via rocker/tidyverse and plotly; listed so the
@@ -30,8 +30,8 @@ CRAN_PACKAGES <- c(
   "shinyjs", "shinythemes", "bslib", "rhandsontable", "markdown",
 
   # Visualization
-  "ggplot2", "plotly", "ggpubr", "cowplot", "ggrepel", "ggvenn", "ggiraph",
-  "ggridges", "rgl", "car",
+  "ggplot2", "plotly", "ggpubr", "cowplot", "ggrepel", "ggvenn",
+  "ggridges", "sass",
 
   # Statistics
   "vegan", "dbscan", "cluster",

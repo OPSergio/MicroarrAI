@@ -167,6 +167,12 @@ discover_isotypes <- function(cols) {
   sort(found[!is.na(found)])
 }
 
+#' Isotype of each column, as detected by discover_isotypes(); "Other" if none
+peptide_isotype <- function(cols) {
+  pre <- sub("_.*", "", cols)
+  ifelse(pre %in% discover_isotypes(cols), pre, "Other")
+}
+
 
 #' Comparable form of a protein name
 #'

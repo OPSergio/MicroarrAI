@@ -1,0 +1,41 @@
+/* Native charts (www/charts/*.js) */
+.mai-chart { position: relative; width: 100%; font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif; color: #191c32; }
+.mai-chart-body { width: 100%; }
+.mai-chart-body svg { display: block; overflow: visible; }
+.mai-chart-head { padding: 0 90px 6px 4px; }
+.mai-chart-head .t { font-weight: 700; font-size: 15px; }
+.mai-chart-head .s { font-size: 12px; color: #6b7280; margin-top: 2px; }
+
+.mai-chart-tools { position: absolute; top: 0; right: 0; display: flex; gap: 4px; opacity: 0; transition: opacity .2s; z-index: 2; }
+.mai-chart:hover .mai-chart-tools { opacity: 1; }
+.mai-chart-tools button { border: 1px solid #dde1e8; background: #fff; color: #4b5563; font: 600 10.5px/1 inherit; letter-spacing: .06em; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+.mai-chart-tools button:hover { border-color: #17a589; color: #17a589; }
+
+.mai-legend { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; }
+.mai-legend-title { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6b7280; font-weight: 700; margin-right: 4px; }
+.mai-legend button, .mai-legend.static span:not(.mai-legend-title) { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #e3e7ee; background: #fff; border-radius: 999px; padding: 4px 11px 4px 8px; font: 600 12px/1.2 inherit; color: #191c32; cursor: pointer; transition: opacity .2s, border-color .2s; }
+.mai-legend.static span:not(.mai-legend-title) { cursor: default; gap: 5px; }
+.mai-legend button:hover { border-color: #b8c0cc; }
+.mai-legend button i { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+.mai-legend button.off { opacity: .4; }
+.mai-legend button.off i { background: transparent !important; box-shadow: inset 0 0 0 2px #b8c0cc; }
+
+.mai-tip { position: absolute; z-index: 10000; pointer-events: none; opacity: 0; transition: opacity .12s; max-width: 280px;
+  background: rgba(25,28,50,.95); color: #fff; padding: 8px 11px; border-radius: 8px; font: 12px/1.5 'Space Grotesk', system-ui, sans-serif;
+  box-shadow: 0 8px 24px rgba(10,12,30,.25); }
+.mai-tip b { display: block; font-weight: 700; margin-bottom: 2px; }
+
+.mai-chart-msg { display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; border-radius: 12px; background: #f5f7fa; border: 1px solid #e3e7ee; margin: 8px 0; }
+.mai-chart-msg span { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; background: #191c32; color: #fff; }
+.mai-chart-msg.error { background: #fff6f4; border-color: #f3d0c8; }
+.mai-chart-msg.error span { background: #d1495b; }
+.mai-chart-msg p { margin: 0; font-size: 13.5px; color: #3a4050; }
+
+.mai-3d { position: relative; border-radius: 14px; overflow: hidden; box-shadow: inset 0 0 0 1px #e3e7ee; touch-action: none; }
+.mai-3d canvas { display: block; cursor: grab; }
+.mai-3d canvas:active { cursor: grabbing; }
+.mai-3d-ctl { position: absolute; left: 10px; top: 10px; display: flex; flex-wrap: wrap; gap: 4px; max-width: calc(100% - 90px); }
+.mai-3d-ctl button { border: 1px solid #e3e7ee; background: rgba(255,255,255,.88); backdrop-filter: blur(4px); color: #4b5563; font: 600 11.5px/1 'Space Grotesk', system-ui, sans-serif; padding: 6px 10px; border-radius: 999px; cursor: pointer; }
+.mai-3d-ctl button.on { background: #191c32; color: #fff; border-color: #191c32; }
+.mai-3d-ctl .sep { width: 6px; }
+.mai-3d-hint { position: absolute; right: 12px; bottom: 9px; font-size: 11px; color: #9aa3b5; pointer-events: none; }

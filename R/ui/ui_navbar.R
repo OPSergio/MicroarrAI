@@ -41,6 +41,13 @@ ui_navbar <- function() {
         metis_link("Docs",              "Documentation")
       ),
 
+      # Tutorial: always one click away, in its own tab so the analysis stays put
+      tags$a(
+        class = "metis-tutorial", href = "tutorial/index.html", target = "_blank", rel = "noopener",
+        title = "Step-by-step guide to analysing your own arrays",
+        icon("graduation-cap"), tags$span("Tutorial")
+      ),
+
       # Light/dark switcher (themes the navbar + the landing iframe)
       tags$button(
         class = "metis-toggle",
@@ -48,6 +55,14 @@ ui_navbar <- function() {
         onclick = "metisTheme(this)",
         HTML("&#9728;")  # ☀
       )
+    ),
+
+    # Report: PDF + Excel of everything computed so far, from any tab
+    tags$script(src = "report_snapshots.js"),
+    tags$button(
+      id = "metis-report-btn", class = "metis-report", type = "button",
+      title = "Download the analysis report (PDF) and all results (Excel)",
+      icon("file-pdf"), tags$span("Report")
     ),
 
     # Reset the whole pipeline — fixed in the top-right corner, always clickable

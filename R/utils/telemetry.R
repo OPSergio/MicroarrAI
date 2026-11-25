@@ -61,6 +61,7 @@ start_metrics_sampler <- function(every = 30) {
 #' Wire telemetry into one user session. Call once at the top of server().
 telemetry_attach <- function(input, session) {
   sid <- substr(as.character(openssl::sha256(session$token)), 1, 8)
+  session$userData$sid <- sid   # tags this user's step log lines (R/utils/logging.R)
   started <- Sys.time()
   .telemetry$sessions <- .telemetry$sessions + 1L
   start_metrics_sampler()

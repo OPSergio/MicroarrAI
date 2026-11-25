@@ -140,6 +140,31 @@ clean_analyte_ids <- function(ids) {
 }
 
 
+#' Read the spot table of an array file
+#'
+#' Some exports end every data row with a separator, so rows have one field
+#' more than the header. read.delim() then takes the first column as row names
+#' (failing on duplicates) and shifts every column name by one. Reading the
+#' header as a plain row avoids both; the empty trailing columns are dropped,
+#' and so is the "END DATA" row that closes ScanArray tables.
+#'
+#' @param file_path Path to the array file
+#' @param header Output of detect_array_header()
+#' @return Data frame with the scanner's column names, types converted
+read_array_table <- function(file_path, header = detect_array_header(file_path)) {
+  df <- utils::read.delim(file_path, sep = header$sep, skip = header$skip, header = FALSE,
+                          colClasses = "character", fill = TRUE, check.names = FALSE,
+                          fileEncoding = header$encoding)
+  names(df) <- trimws(unlist(df[1, ], use.names = FALSE))
+  df <- df[-1, !is.na(names(df)) & nzchar(names(df)), drop = FALSE]
+  # ScanArray closes the table with an "END DATA" row; it is not a spot
+  df <- df[!grepl("^END\\b", df[[1]], ignore.case = TRUE), , drop = FALSE]
+  df[] <- lapply(df, utils::type.convert, as.is = TRUE)
+  rownames(df) <- NULL
+  df
+}
+
+
 #' Read and Process Single Microarray File
 #'
 #' @param file_path Character. Full path to the array file (.csv, .txt, .gpr)
@@ -165,17 +190,19 @@ read_microarray_file <- function(file_path,
   spot_metric <- match.arg(spot_metric)
   header <- detect_array_header(file_path)
 
-  df <- utils::read.delim(file_path, sep = header$sep, skip = header$skip,
-                          check.names = FALSE, stringsAsFactors = FALSE,
-                          fileEncoding = header$encoding)
+  df <- read_array_table(file_path, header)
+  if ("ID" %in% names(df)) df <- df[!is.na(df$ID) & nzchar(trimws(df$ID)), , drop = FALSE]   # unnamed rows are not analytes
 
   channels <- detect_array_channels(names(df))
 
+  flagged <- rep(FALSE, nrow(df))
   if ("Flags" %in% names(df)) {
     flags <- suppressWarnings(as.numeric(df$Flags))
     genepix_flags <- header$atf || any(flags < 0, na.rm = TRUE)
     keep <- if (genepix_flags) flags > -75 else flags < flag_threshold
-    df <- df[!is.na(keep) & keep, , drop = FALSE]
+    flagged <- is.na(keep) | !keep
+    # QC must see flagged spots to count them as missing, so they stay as NA there
+    if (!with_quality) { df <- df[!flagged, , drop = FALSE]; flagged <- flagged[!flagged] }
   }
 
   ids <- clean_analyte_ids(df[["ID"]])
@@ -188,7 +215,7 @@ read_microarray_file <- function(file_path,
     spot <- tibble::tibble(
       ID = ids,
       channel = channels$channel[i],
-      Expression = if (spot_metric == "ratio") log2(fg / bg) else fg - bg
+      Expression = ifelse(flagged, NA_real_, if (spot_metric == "ratio") log2(fg / bg) else fg - bg)
     )
 
     if (!with_quality) return(spot)
@@ -312,8 +339,10 @@ process_microarray_batch <- function(file_paths,
   data_list <- lapply(seq_along(file_paths), function(i) {
     file <- file_paths[i]
 
-    spots <- read_microarray_file(file, spot_metric = spot_metric,
-                                  with_quality = return_qc)
+    # Name the file in the error: one bad file stops the batch, and the user
+    # needs to know which one to fix or remove.
+    spots <- tryCatch(read_microarray_file(file, spot_metric = spot_metric, with_quality = return_qc),
+                      error = function(e) stop("could not read ", basename(file), " (", conditionMessage(e), ")", call. = FALSE))
 
     # Single-channel analysis: drop the other channel(s) before anything is
     # normalized or reported, so QC and features agree on what was analysed.
@@ -331,14 +360,23 @@ process_microarray_batch <- function(file_paths,
       )
     }
 
-    df <- spots %>%
+    # Name file and channel when normalization fails: the usual cause is a
+    # channel scanned without signal (all blanks identical), which the user
+    # can simply untick in Step 3.
+    df <- tryCatch(spots %>%
       dplyr::group_by(channel) %>%
       dplyr::mutate(
         MExpression = normalize_channel(
           Expression, ID, normalization_method, negative_controls
         )
       ) %>%
-      dplyr::ungroup() %>%
+      dplyr::ungroup(), error = function(e) {
+        ch <- regmatches(conditionMessage(e), regexpr('channel = "[^"]+"', conditionMessage(e)))
+        why <- if (!is.null(e$parent)) conditionMessage(e$parent) else conditionMessage(e)
+        stop("could not normalise ", basename(file), if (length(ch)) paste0(", ", sub('channel = "([^"]+)"', "channel \\1", ch)),
+             " (", trimws(sub("^.*normalize: ", "", why)), ")",
+             if (grepl("zero variance", why)) ". That channel looks empty in this file: untick it in Step 3." else "", call. = FALSE)
+      }) %>%
       dplyr::mutate(Sample = tools::file_path_sans_ext(basename(file))) %>%
       dplyr::select(Sample, ID, channel, MExpression)
 

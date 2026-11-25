@@ -424,87 +424,31 @@ calculate_performance_metrics <- function(predictions, actual, probabilities) {
 #'
 #' @export
 calculate_roc_curve <- function(actual, probabilities) {
-  
-  # Input validation
-  if (!is.factor(actual)) {
-    actual <- as.factor(actual)
+  actual <- droplevels(as.factor(actual))
+  lv <- levels(actual)
+
+  # One curve: points ordered along the path (FPR up, then TPR up at ties),
+  # so a line through them is the usual staircase. pROC returns them by
+  # threshold; sorting by FPR alone made ties zigzag down and back up.
+  one_curve <- function(response, score, positive, levels_rc) {
+    roc_obj <- pROC::roc(response = response, predictor = score, levels = levels_rc,
+                         direction = "<", quiet = TRUE)
+    ci <- tryCatch(as.numeric(pROC::ci.auc(roc_obj, method = "delong")), error = function(e) rep(NA_real_, 3))
+    d <- data.frame(specificity = roc_obj$specificities, sensitivity = roc_obj$sensitivities,
+                    class = positive, auc = as.numeric(pROC::auc(roc_obj)), auc_low = ci[1], auc_high = ci[3])
+    d[order(1 - d$specificity, d$sensitivity), ]
   }
-  
-  # Binary classification
-  if (nlevels(actual) == 2) {
-    
-    if (!is.numeric(probabilities)) {
-      stop("For binary classification, probabilities must be numeric vector")
-    }
-    
-    # Calculate ROC
-    roc_obj <- pROC::roc(
-      response = actual,
-      predictor = probabilities,
-      levels = levels(actual),
-      direction = "<"
-    )
-    
-    # Extract coordinates
-    roc_data <- data.frame(
-      specificity = roc_obj$specificities,
-      sensitivity = roc_obj$sensitivities,
-      class = levels(actual)[2],  # Positive class
-      auc = as.numeric(pROC::auc(roc_obj))
-    )
-    
-    return(roc_data)
-    
-  } else {
-    # Multiclass classification
-    
-    if (!is.data.frame(probabilities)) {
-      probabilities <- as.data.frame(probabilities)
-    }
-    
-    # Initialize list for ROC data
-    roc_list <- list()
-    
-    # Calculate ROC for each class (one-vs-rest)
-    for (i in 1:nlevels(actual)) {
-      class_name <- levels(actual)[i]
-      
-      # Create binary response
-      binary_response <- ifelse(actual == class_name, 1, 0)
-      
-      # Get probability for this class - use column index directly
-      class_prob <- probabilities[[i]]
-      
-      # Calculate ROC
-      roc_obj <- tryCatch({
-        pROC::roc(
-          response = binary_response,
-          predictor = class_prob,
-          levels = c(0, 1),
-          direction = "<",
-          quiet = TRUE
-        )
-      }, error = function(e) {
-        warning(paste("Error calculating ROC for class", class_name, ":", e$message))
-        return(NULL)
-      })
-      
-      if (is.null(roc_obj)) {
-        next
-      }
-      
-      # Store coordinates
-      roc_list[[i]] <- data.frame(
-        specificity = roc_obj$specificities,
-        sensitivity = roc_obj$sensitivities,
-        class = class_name,
-        auc = as.numeric(pROC::auc(roc_obj))
-      )
-    }
-    
-    # Combine all ROC curves
-    roc_data <- dplyr::bind_rows(roc_list)
-    
-    return(roc_data)
+
+  if (length(lv) == 2) {
+    if (!is.numeric(probabilities)) stop("For binary classification, probabilities must be a numeric vector")
+    return(one_curve(actual, probabilities, lv[2], lv))
   }
+
+  # Multiclass: one-vs-rest, each class scored by ITS OWN probability column
+  probabilities <- as.data.frame(probabilities)
+  dplyr::bind_rows(lapply(lv, function(cl) {
+    score <- if (cl %in% names(probabilities)) probabilities[[cl]] else probabilities[[match(cl, lv)]]
+    tryCatch(one_curve(factor(actual == cl, levels = c(FALSE, TRUE)), score, cl, c(FALSE, TRUE)),
+             error = function(e) { warning("ROC for class ", cl, " failed: ", conditionMessage(e)); NULL })
+  }))
 }

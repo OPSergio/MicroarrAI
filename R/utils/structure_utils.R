@@ -24,10 +24,14 @@ fetch_json <- function(url, cache_key = url) {
 
   old <- options(timeout = 20); on.exit(options(old), add = TRUE)
 
+  # A 404 may arrive as a connection warning followed by a generic "cannot open"
+  # error, so the warning text is kept (and muffled) to recognise it.
+  warned <- ""
   res <- tryCatch(
-    list(status = "ok", data = jsonlite::fromJSON(url)),
+    withCallingHandlers(list(status = "ok", data = jsonlite::fromJSON(url)),
+                        warning = function(w) { warned <<- conditionMessage(w); invokeRestart("muffleWarning") }),
     error = function(e) {
-      msg <- conditionMessage(e)
+      msg <- paste(conditionMessage(e), warned)
       # EBI answers 404 when it simply has nothing for the accession
       if (grepl("404", msg, fixed = TRUE)) list(status = "absent", data = NULL)
       else list(status = "error", data = NULL, message = msg)

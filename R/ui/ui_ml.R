@@ -328,6 +328,25 @@ ui_ml <- function() {
                 
                 tags$hr(style = "margin: 20px 0;"),
                 
+                # Validation scheme: how performance is measured
+                tags$div(
+                  style = "background: #e8f6f3; border-left: 4px solid #17a589; padding: 12px; margin-bottom: 15px; border-radius: 4px;",
+                  tags$div(
+                    style = "display: flex; align-items: center; margin-bottom: 10px;",
+                    icon("shield-alt", style = "color: #17a589; margin-right: 8px; font-size: 16px;"),
+                    tags$strong("Validation", style = "color: #0e6655; font-size: 13px;")
+                  ),
+                  radioButtons("ml_validation_mode", NULL,
+                    choices = c("Independent test set (70/30 hold-out)" = "holdout",
+                                "Nested cross-validation (small samples)" = "nested"),
+                    selected = "holdout"),
+                  numericInput("ml_seed", tags$small("Random seed (split and folds)"),
+                               value = 123, min = 1, step = 1, width = "160px"),
+                  tags$small("Imputation, peptide selection, RFE and tuning use the training samples only.",
+                             style = "color: #666; font-size: 11px;"),
+                  uiOutput("ml_validation_hint")
+                ),
+
                 # Advanced Options Section
                 tags$div(
                   style = "background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin-bottom: 15px; border-radius: 4px;",
@@ -358,7 +377,7 @@ ui_ml <- function() {
                     tags$span(
                       tags$strong("Cross-Validation (CV)", style = "font-size: 13px;"),
                       tags$br(),
-                      tags$small("Evaluate model performance with k-fold CV", style = "color: #666; font-size: 11px;")
+                      tags$small("5-fold CV x 3 inside the training set (tuning and RFE)", style = "color: #666; font-size: 11px;")
                     ),
                     value = TRUE
                   ),
@@ -450,17 +469,13 @@ ui_ml <- function() {
                 tags$h5("2D Projection", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
                 tags$p("PCA reduces dimensionality by projecting data onto principal components that capture maximum variance.", 
                        style = "color: #666; font-size: 13px; margin-bottom: 15px;"),
-                shinycssloaders::withSpinner(girafeOutput("PCA_2d", height = "450px"))
+                shinycssloaders::withSpinner(chartOutput("PCA_2d", height = "500px"))
               )
             ),
             column(6,
               tags$div(
-                tags$h5("3D Interactive Visualization", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
-                actionButton("toggle_surface_PCA", "Toggle Surface Type", style = "margin-bottom: 10px;"),
-                actionButton("toggle_ellipsoid_PCA", "Toggle Ellipsoid", style = "margin-bottom: 10px;"),
-                br(),
-                verbatimTextOutput("current_params_PCA"),
-                shinycssloaders::withSpinner(rglwidgetOutput("d3_PCA", height = "500px"))
+                tags$h5("3D projection", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                shinycssloaders::withSpinner(chartOutput("d3_PCA", height = "500px"))
               )
             )
           )
@@ -499,17 +514,13 @@ ui_ml <- function() {
                 tags$h5("2D Ordination", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
                 tags$p("PCoA visualizes sample relationships based on a distance matrix, preserving inter-sample distances.", 
                        style = "color: #666; font-size: 13px; margin-bottom: 15px;"),
-                shinycssloaders::withSpinner(girafeOutput("PCoA_2d", height = "450px"))
+                shinycssloaders::withSpinner(chartOutput("PCoA_2d", height = "500px"))
               )
             ),
             column(6,
               tags$div(
-                tags$h5("3D Interactive Visualization", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
-                actionButton("toggle_surface_PCOA", "Toggle Surface Type", style = "margin-bottom: 10px;"),
-                actionButton("toggle_ellipsoid_PCOA", "Toggle Ellipsoid", style = "margin-bottom: 10px;"),
-                br(),
-                verbatimTextOutput("current_params_PCOA"),
-                shinycssloaders::withSpinner(rglwidgetOutput("PCoA_3d", height = "500px"))
+                tags$h5("3D projection", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                shinycssloaders::withSpinner(chartOutput("PCoA_3d", height = "500px"))
               )
             )
           )
@@ -548,17 +559,13 @@ ui_ml <- function() {
                 tags$h5("2D Ordination", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
                 tags$p("NMDS preserves rank-order distances between samples using a non-linear approach. Lower stress values indicate better fit.", 
                        style = "color: #666; font-size: 13px; margin-bottom: 15px;"),
-                shinycssloaders::withSpinner(girafeOutput("NMDS_2d", height = "450px"))
+                shinycssloaders::withSpinner(chartOutput("NMDS_2d", height = "500px"))
               )
             ),
             column(6,
               tags$div(
-                tags$h5("3D Interactive Visualization", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
-                actionButton("toggle_surface_NMDS", "Toggle Surface Type", style = "margin-bottom: 10px;"),
-                actionButton("toggle_ellipsoid_NMDS", "Toggle Ellipsoid", style = "margin-bottom: 10px;"),
-                br(),
-                verbatimTextOutput("current_params_NMDS"),
-                shinycssloaders::withSpinner(rglwidgetOutput("NMDS_3d", height = "500px"))
+                tags$h5("3D projection", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
+                shinycssloaders::withSpinner(chartOutput("NMDS_3d", height = "500px"))
               )
             )
           )
@@ -607,7 +614,7 @@ ui_ml <- function() {
                 tags$h5("Cluster Visualization", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
                 tags$p("DBSCAN identifies dense regions as clusters and marks sparse points as outliers (noise).", 
                        style = "color: #666; font-size: 13px; margin-bottom: 15px;"),
-                shinycssloaders::withSpinner(girafeOutput("dbscan_plot", height = "450px"))
+                shinycssloaders::withSpinner(chartOutput("dbscan_plot", height = "450px"))
               )
             ),
             column(6,
@@ -633,7 +640,7 @@ ui_ml <- function() {
                 tags$h5("Score Plot", style = "color: #191c32; margin-bottom: 15px; font-weight: 600;"),
                 tags$p("PLS-DA maximizes separation between groups by finding latent variables that best discriminate classes.", 
                        style = "color: #666; font-size: 13px; margin-bottom: 15px;"),
-                shinycssloaders::withSpinner(girafeOutput("plsda_score_plot", height = "450px"))
+                shinycssloaders::withSpinner(chartOutput("plsda_score_plot", height = "450px"))
               )
             ),
             column(6,
@@ -650,7 +657,15 @@ ui_ml <- function() {
       ),
       
       # ===== SUPERVISED RESULTS =====
-      
+
+      # Validation summary: test-set metrics of every trained model
+      tags$div(
+        id = "ml_validation_results",
+        style = "margin-top: 20px;",
+        section_title("Model Validation", size = "2em"),
+        uiOutput("ml_validation_summary")
+      ),
+
       # C5.0 Section
       tags$div(
         id = "ml_c50_results",

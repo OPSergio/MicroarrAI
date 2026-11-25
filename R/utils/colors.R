@@ -47,3 +47,37 @@ microarrai_pal <- function() {
     }
   }
 }
+
+# ----------------------------------------------------------------------------
+# Isotypes and scanner channels (lab convention)
+# ----------------------------------------------------------------------------
+# Channel 1 is scanned red and holds IgG4; channel 2 is scanned green and holds
+# IgE. GenePix-style files name channels by wavelength (635 nm red, 532 nm
+# green) instead, so those are mapped by colour, not by order.
+ISOTYPE_COLORS <- c(IgE = "#17a589", IgG4 = "#d1495b")
+
+#' Colour per isotype: IgE green, IgG4 red, any other from the palette
+isotype_colors <- function(isos) {
+  other <- rep_len(c("#1F78B4", "#6A3D9A", "#FF7F00", "#2C3E50"), length(isos))
+  unname(ifelse(isos %in% names(ISOTYPE_COLORS), ISOTYPE_COLORS[isos], other))
+}
+
+#' Default label of each detected channel
+#'
+#' Wavelength-named channels (GenePix / ScanArray .gpr: 532, 543, 633, 635…)
+#' follow their laser colour, however many there are; a pair of numbered
+#' channels (ScanArray CSV "Ch1", "Ch2") follows the order red, green.
+default_channel_labels <- function(channels) {
+  nm <- suppressWarnings(as.numeric(channels))
+  wl <- !is.na(nm) & nm > 400
+  out <- paste0("Ch", channels)
+  out[wl] <- ifelse(nm[wl] >= 600, "IgG4", "IgE")
+  if (!any(wl) && length(channels) == 2) out <- c("IgG4", "IgE")
+  out
+}
+
+#' Scanner colour of channel i, for the dot next to its label
+channel_color <- function(channels, i) {
+  label <- default_channel_labels(channels)[i]
+  if (label %in% names(ISOTYPE_COLORS)) ISOTYPE_COLORS[[label]] else "#9ca3af"
+}

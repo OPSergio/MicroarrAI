@@ -43,40 +43,21 @@ calculate_peptide_summary <- function(peptide_data, expression_threshold = 3) {
     dplyr::select(sample_id, n_positive_peptides, mean_expression, 
                   median_expression, sd_expression)
   
-  # Isotype analysis (IgE, IgG4, Other)
-  peptide_cols <- colnames(numeric_data)
-  
-  # Calculate positive peptides per isotype using literal threshold
-  ige_cols <- grepl("^IgE_", peptide_cols, ignore.case = TRUE)
-  igg4_cols <- grepl("^IgG4_", peptide_cols, ignore.case = TRUE)
-  other_cols <- !grepl("^(IgE_|IgG4_)", peptide_cols, ignore.case = TRUE)
-  
-  isotype_summary <- tibble(
-    Isotype = c("IgE", "IgG4", "Other"),
-    n_samples = nrow(numeric_data),
-    n_peptides = c(
-      sum(ige_cols),
-      sum(igg4_cols),
-      sum(other_cols)
-    ),
-    # NOTE: this counts positive (sample x peptide) observations, NOT peptide
-    # features. Total possible observations per isotype = n_peptides * n_samples.
-    n_positive_peptides = c(
-      sum(as.matrix(numeric_data[, ige_cols]) > expression_threshold, na.rm = TRUE),
-      sum(as.matrix(numeric_data[, igg4_cols]) > expression_threshold, na.rm = TRUE),
-      sum(as.matrix(numeric_data[, other_cols]) > expression_threshold, na.rm = TRUE)
-    ),
-    mean_expression = c(
-      mean(as.matrix(numeric_data[, ige_cols]), na.rm = TRUE),
-      mean(as.matrix(numeric_data[, igg4_cols]), na.rm = TRUE),
-      mean(as.matrix(numeric_data[, other_cols]), na.rm = TRUE)
-    ),
-    median_expression = c(
-      median(as.matrix(numeric_data[, ige_cols]), na.rm = TRUE),
-      median(as.matrix(numeric_data[, igg4_cols]), na.rm = TRUE),
-      median(as.matrix(numeric_data[, other_cols]), na.rm = TRUE)
+  # Isotype analysis: one row per isotype found in the column names, plus "Other"
+  iso_of <- peptide_isotype(colnames(numeric_data))
+  mat <- as.matrix(numeric_data)
+  isotype_summary <- purrr::map_dfr(unique(iso_of), function(iso) {
+    m <- mat[, iso_of == iso, drop = FALSE]
+    tibble(
+      Isotype = iso,
+      n_samples = nrow(mat),
+      n_peptides = ncol(m),
+      # NOTE: counts positive (sample x peptide) observations, NOT peptide features
+      n_positive_peptides = sum(m > expression_threshold, na.rm = TRUE),
+      mean_expression = mean(m, na.rm = TRUE),
+      median_expression = median(m, na.rm = TRUE)
     )
-  ) %>%
+  }) %>%
     dplyr::filter(n_peptides > 0)
   
   # Expression distribution (quantiles)
@@ -98,45 +79,16 @@ calculate_peptide_summary <- function(peptide_data, expression_threshold = 3) {
 
 
 #' Create Interactive Donut Chart for Isotype Distribution
-create_isotype_donut_chart <- function(isotype_summary, 
-                                       colors = c("#191c32", "#17a589", "#00A087FF")) {
+create_isotype_donut_chart <- function(isotype_summary) {
   
-  # Calculate percentages and coordinates for donut chart
-  isotype_summary <- isotype_summary %>%
-    dplyr::mutate(
-      # Total possible measurements for this isotype (peptide features x samples)
-      n_observations = n_peptides * n_samples,
-      # Share of positive calls across isotypes (drives the donut wedge sizes)
-      positive_percentage = round(n_positive_peptides / sum(n_positive_peptides) * 100, 1),
-      fraction = n_positive_peptides / sum(n_positive_peptides),
-      ymax = cumsum(fraction),
-      ymin = c(0, head(ymax, n = -1)),
-      labelPosition = (ymax + ymin) / 2,
-      label = paste0(positive_percentage, "%"),
-      tooltip = paste0(
-        "<b>", Isotype, "</b><br/>",
-        "Positive calls: ", n_positive_peptides, "<br/>",
-        "Peptides: ", n_peptides, " x ", n_samples, " samples = ", n_observations, "<br/>",
-        "% Positive: ", round(n_positive_peptides / n_observations * 100, 1), "%<br/>",
-        "Mean Expr: ", round(mean_expression, 2)
-      ),
-      data_id = Isotype
-    )
-  
-  # Create donut chart with ggiraph
-  p <- ggplot(isotype_summary, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 2.5,
-                                    fill = Isotype, tooltip = tooltip, data_id = data_id)) +
-    geom_rect_interactive(color = "white", linewidth = 1.5) +
-    coord_polar(theta = "y") +
-    xlim(c(0, 4)) +
-    scale_fill_manual(values = colors[1:nrow(isotype_summary)]) +
-    theme_void() +
-    theme(
-      legend.position = "bottom",
-      legend.title = element_blank()
-    )
-  
-  apply_girafe(p, width_svg = 4, height_svg = 4)
+  # Wedges are the share of positive calls (sample x peptide above threshold)
+  d <- isotype_summary %>% dplyr::mutate(n_observations = n_peptides * n_samples)
+  spec <- chart_donut(d$Isotype, d$n_positive_peptides, isotype_colors(d$Isotype), center_label = "positive calls")
+  spec$slices$tip <- paste0(d$Isotype, "\nPositive calls: ", d$n_positive_peptides,
+                            "\nPeptides: ", d$n_peptides, " x ", d$n_samples, " samples",
+                            "\n% positive: ", round(100 * d$n_positive_peptides / d$n_observations, 1), " %",
+                            "\nMean expression: ", round(d$mean_expression, 2))
+  spec
 }
 
 
@@ -222,41 +174,8 @@ sample_heatmap_features <- function(matrix_data, max_features = 300, seed = 123)
 
 #' Create Interactive Expression Distribution Plot
 create_expression_distribution_plot <- function(peptide_data) {
-  
-  # Convert to long format and identify isotype
-  expression_values <- peptide_data %>%
-    dplyr::select(where(is.numeric)) %>%
-    tidyr::pivot_longer(everything(), names_to = "peptide", values_to = "expression") %>%
-    dplyr::filter(!is.na(expression)) %>%
-    dplyr::mutate(
-      Isotype = case_when(
-        grepl("^IgE_", peptide, ignore.case = TRUE) ~ "IgE",
-        grepl("^IgG4_", peptide, ignore.case = TRUE) ~ "IgG4",
-        TRUE ~ "Other"
-      ),
-      tooltip = paste0(
-        "<b>", Isotype, "</b><br/>",
-        "Expression: ", round(expression, 2)
-      ),
-      data_id = paste0(Isotype, "_", row_number())
-    )
-  
-  # Create histogram with ggiraph and facets
-  p <- ggplot(expression_values, aes(x = expression, fill = Isotype)) +
-    geom_histogram(alpha = 0.8, bins = 40) +
-    facet_wrap(~Isotype, ncol = 1, scales = "free_y") +
-    scale_fill_manual(values = c("IgE" = "#17a589", "IgG4" = "#00A087FF", "Other" = "#4DBBD5FF")) +
-    labs(
-      title = "Expression Distribution by Isotype",
-      x = "Expression Value", 
-      y = "Frequency"
-    ) +
-    theme_microarrai() +
-    theme(
-      legend.position = "none",
-      strip.background = element_rect(fill = "#f4f6f9", color = "#191c32"),
-      strip.text = element_text(face = "bold", size = 11)
-    )
-  
-  apply_girafe(p, width_svg = 10, height_svg = 6)
+  num <- dplyr::select(peptide_data, where(is.numeric))
+  iso <- peptide_isotype(names(num))
+  panels <- lapply(split(names(num), factor(iso, levels = unique(iso))), function(cols) unlist(num[cols], use.names = FALSE))
+  chart_histogram(panels, isotype_colors(names(panels)), xlab = "Expression value")
 }

@@ -47,16 +47,14 @@ library(ggpubr)       # Publication-ready plots
 library(cowplot)      # Plot composition and themes
 library(ggrepel)      # Non-overlapping text labels
 library(ggvenn)       # Venn diagrams
-library(ggiraph)      # Interactive ggplot2 graphics
 
-# -----------------------------------------------------------------------------
-# Data Visualization - 3D
-# -----------------------------------------------------------------------------
-# Headless server: no X display. Without this rgl tries to open one, which
-# can crash or hang the R process; rglwidget() only needs the null device.
-options(rgl.useNULL = TRUE)
-library(rgl)          # 3D visualization and graphics
-library(car)          # 3D ellipsoids and scatter plots
+# Interactive charts (scatter, 3D, donut, radar, QC heatmap) are drawn in the
+# browser by www/charts/*.js from specs built in R/utils/charts.R: no server
+# fonts or graphics devices involved.
+
+# bslib/sass cache: the app folder and $HOME are read-only or missing on the
+# server, which logged a warning per session. A temp dir always works.
+options(sass.cache = sass::sass_file_cache(file.path(tempdir(), "sass-cache")))
 
 # -----------------------------------------------------------------------------
 # Statistical Analysis & Clustering
@@ -115,15 +113,21 @@ source("R/server/ml_rfe_helpers.R", encoding = "UTF-8")
 
 # Machine Learning - Supervised methods (C5.0, RF, SVM, XGBoost)
 source("R/server/ml_supervised.R", encoding = "UTF-8")
+source("R/server/ml_validation.R", encoding = "UTF-8")   # Hold-out / nested CV, leak-free
 
 # Regression models and predictive analytics
 source("R/server/regression_models.R", encoding = "UTF-8")
 
-# 3D visualization and interactive plots
-source("R/server/visualization_3d.R", encoding = "UTF-8")
 
 # 2D/3D Protein visualization (IgE/IgG4 separated)
 source("R/server/visualization_protein.R", encoding = "UTF-8")
+
+# Built-in synthetic example datasets (www/examples)
+source("R/server/example_data.R", encoding = "UTF-8")
+
+# Analysis report (PDF) and results workbook
+source("R/server/report.R", encoding = "UTF-8")
+source("R/server/report_server.R", encoding = "UTF-8")
 
 # =============================================================================
 # UI MODULES
@@ -142,8 +146,16 @@ source("R/ui/ui_documentation.R", encoding = "UTF-8") # Documentation viewer tab
 # HELPER FUNCTIONS
 # =============================================================================
 
-# Ggiraph theme and interactive plot utilities
-source("Def/ggiraph_theme.R", encoding = "UTF-8")
+# Step-by-step log (log_step / run_step)
+source("R/utils/logging.R", encoding = "UTF-8")
+# Anything an observer did not catch still gets a step line (shiny >= 1.8.1)
+if (exists("onUnhandledError", asNamespace("shiny"))) {
+  shiny::onUnhandledError(function(err) log_step("APP", "Unhandled error", level = "ERROR",
+    why = conditionMessage(err), where = if (!is.null(conditionCall(err))) deparse(conditionCall(err), nlines = 1)[1]))
+}
+
+# Native interactive charts (renderChart / chartOutput)
+source("R/utils/charts.R", encoding = "UTF-8")
 
 # Color palette definitions
 source("R/utils/colors.R", encoding = "UTF-8")

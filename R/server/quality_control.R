@@ -12,15 +12,18 @@
 #'
 #' `good` and `warn` are the cut points; `higher_is_better` says which side is
 #' healthy. The replicate cut points follow the reproducibility published for
-#' overlapping-peptide allergen arrays (R = 0.92-0.96).
+#' overlapping-peptide allergen arrays (R = 0.92-0.96). The signal/noise cut
+#' points are the classical detection (3 sigma) and quantification (10 sigma)
+#' limits over background (Currie, 1968, Anal Chem 40:586; IUPAC k = 3, Long &
+#' Winefordner, 1983, Anal Chem 55:712A).
 QC_THRESHOLDS <- tibble::tribble(
   ~metric,        ~label,                    ~good, ~warn, ~higher_is_better, ~meaning,
   "replicates",   "Replicate agreement (R)",  0.90,  0.80,  TRUE,
   "Correlation between the two spots of each peptide on the same array. Low means the array itself is not reproducible, so no downstream difference can be trusted.",
   "dose",         "Positive control slope",   0.80,  0.40,  TRUE,
   "Correlation between the concentration of the positive control dilution series and its signal. Low means the assay did not respond, regardless of what the peptides show.",
-  "snr",          "Signal / noise",           3.00,  1.50,  TRUE,
-  "Median spot signal divided by its local background. Around 1 the channel is measuring background, not binding.",
+  "snr",          "Positive control S/N",    10.00,  3.00,  TRUE,
+  "Signal-to-noise of the strongest positive-control spots, (signal - background) / SD(background) as the scanner reports it. Below 3 the assay does not detect its own positive control (detection limit, 3 SD); from 10 it is quantifiable (quantification limit, 10 SD).",
   "background",   "Background stability",     1.50,  2.00,  FALSE,
   "How far this array's blank-spot spread sits from the cohort median, as a ratio. High means its blanks are unusually noisy, which distorts any control-based normalization.",
   "missing",      "Missing spots (%)",        2.00,  5.00,  FALSE,
@@ -72,6 +75,33 @@ grade_metric <- function(metric, value) {
 PEPTIDE_ID_PATTERN <- "(^|_)p[ _.-]?\\d+_"
 
 
+#' Signal/noise of the strongest positive control
+#'
+#' Median scanner S/N of the top-dose spots of each control series; the best
+#' series counts, because an anti-IgE series need not light up the IgG4 channel.
+#' Measured on controls, not on all spots: most peptides do not bind, so their
+#' S/N sits near background on any healthy array.
+#'
+#' @return Tibble: sample, channel, snr (NA when the scanner gives no S/N)
+positive_control_snr <- function(spots, positive_controls) {
+  if (!"snr" %in% names(spots)) {
+    return(dplyr::distinct(spots, sample, channel) %>% dplyr::mutate(snr = NA_real_))
+  }
+  top <- positive_controls %>%
+    dplyr::mutate(series = sub("_?[0-9]+$", "", ID)) %>%
+    dplyr::group_by(series) %>%
+    dplyr::filter(dose == max(dose)) %>%
+    dplyr::ungroup()
+  spots %>%
+    dplyr::inner_join(top, by = "ID") %>%
+    dplyr::group_by(sample, channel, series) %>%
+    dplyr::summarise(snr = stats::median(snr, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::group_by(sample, channel) %>%
+    dplyr::summarise(snr = suppressWarnings(max(snr, na.rm = TRUE)), .groups = "drop") %>%
+    dplyr::mutate(snr = ifelse(is.finite(snr), snr, NA_real_))
+}
+
+
 compute_array_quality <- function(spots,
                                   negative_controls = "PBS_1X",
                                   positive_controls = NULL) {
@@ -101,7 +131,6 @@ compute_array_quality <- function(spots,
   general <- spots %>%
     dplyr::group_by(sample, channel) %>%
     dplyr::summarise(
-      snr        = if ("snr" %in% names(spots)) stats::median(snr, na.rm = TRUE) else NA_real_,
       saturation = if ("saturation" %in% names(spots)) 100 * mean(saturation > 0, na.rm = TRUE) else NA_real_,
       missing    = 100 * mean(!is.finite(Expression)),
       blank_mad  = stats::mad(Expression[ID %in% negative_controls], na.rm = TRUE),
@@ -130,9 +159,12 @@ compute_array_quality <- function(spots,
         .groups = "drop"
       )
     metrics <- dplyr::left_join(metrics, dose, by = c("sample", "channel"))
+    metrics <- dplyr::left_join(metrics, positive_control_snr(spots, positive_controls),
+                                by = c("sample", "channel"))
   } else {
     metrics$dose <- NA_real_
   }
+  if (!"snr" %in% names(metrics)) metrics$snr <- NA_real_
 
   metrics
 }

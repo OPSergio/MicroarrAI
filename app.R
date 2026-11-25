@@ -79,9 +79,23 @@ server <- function(input, output, session){
   
   # Returns "" while nothing is uploaded, which every downstream req()/guard
   # already treats as "no data yet".
-  path1 <- reactive({
-    stage_uploaded_files(input$raw_files, raw_upload_dir)
+  # Either the user's upload or a built-in example (R/server/example_data.R)
+  # (the staging dir never changes, so a counter is what signals new files)
+  staged_dir <- reactiveVal("")
+  staged_n <- reactiveVal(0)
+  stage <- function(dir) { staged_dir(dir); staged_n(staged_n() + 1) }
+  observeEvent(input$raw_files, {
+    example_channels(NULL)
+    f <- input$raw_files
+    log_step("UPLOAD", "Scan files received", files = nrow(f), mb = round(sum(f$size) / 1024^2, 1),
+             extensions = unique(tolower(tools::file_ext(f$name))))
+    dir <- run_step("UPLOAD", "staging the scan files", stage_uploaded_files(f, raw_upload_dir),
+                    hint = "Upload the files again; if it persists the server disk may be full.")
+    if (!is.null(dir)) stage(dir)
   })
+  path1 <- reactive({ staged_n(); staged_dir() })
+  example_annotation <- reactiveVal(NULL)
+  example_channels <- reactiveVal(NULL)
   
   # Reset the whole pipeline from scratch (fresh session clears every reactiveVal
   # and cached result) so the user never has to reload the browser manually.
@@ -101,15 +115,14 @@ server <- function(input, output, session){
   qc_spot_data <- reactiveVal(NULL)      # spot-level data feeding Quality Control
   norm_diagnostics <- reactiveVal(NULL)  # did normalization make arrays comparable?
   
-  # ===== ACTIVE DATABASE: Returns edited version if exists, else original =====
+  # Clinical columns the user chose to analyse (NULL = all of them)
+  clinical_keep <- reactiveVal(NULL)
+
+  # ===== ACTIVE DATABASE: edited version if any, restricted to the chosen columns =====
   active_database <- reactive({
-    if (!is.null(database_edited()) && nrow(database_edited()) > 0) {
-      return(database_edited())
-    } else if (!is.null(database())) {
-      return(database())
-    } else {
-      return(NULL)
-    }
+    df <- if (!is.null(database_edited()) && nrow(database_edited()) > 0) database_edited() else database()
+    if (is.null(df) || is.null(clinical_keep())) return(df)
+    df[, intersect(names(df), c("id", clinical_keep())), drop = FALSE]
   })
   
   # ===== UI Output: Input Mode Info =====
@@ -135,12 +148,12 @@ server <- function(input, output, session){
   output$step2_instructions <- renderUI({
     if (input$input_mode == "raw") {
       tagList(
-        tags$h5(icon("info-circle"), " Load RAW GenePix Files", style = "color: #191c32; margin-bottom: 10px;"),
-        tags$p("Upload the scanner output files: GenePix / Mapix .gpr, or .csv / .txt exports.", style = "color: #191c32;"),
+        tags$h5(icon("info-circle"), " Load your scanner files", style = "color: #191c32; margin-bottom: 10px;"),
+        tags$p("One file per array, as the scanner exported it: GenePix / Mapix / InnoScan .gpr, or ScanArray and other .csv / .txt / .tsv exports.", style = "color: #191c32;"),
         tags$p(tags$b("What happens next:"), style = "color: #191c32;"),
         tags$ul(
           style = "color: #191c32;",
-          tags$li("System will detect GenePix header automatically"),
+          tags$li("The file header, separator and channels are detected automatically"),
           tags$li("Analyte IDs will be extracted and cleaned"),
           tags$li("Control selectors will be populated")
         )
@@ -217,9 +230,7 @@ output$normalization_method_description <- renderUI({
     files <- list_array_files(path1())
     req(length(files) > 0)
 
-    header <- detect_array_header(files[1])
-    utils::read.delim(files[1], sep = header$sep, skip = header$skip,
-                      check.names = FALSE, fileEncoding = header$encoding)
+    read_array_table(files[1])
   })
   detected_channels <- reactive(detect_array_channels(names(first_array()))$channel)
   silent_channels <- reactive(silent_array_channels(first_array()))
@@ -247,7 +258,7 @@ output$normalization_method_description <- renderUI({
     channels <- detected_channels()
     silent <- intersect(silent_channels(), channels)
     if (length(silent) == length(channels)) silent <- character(0)  # nothing to choose
-    legacy <- c("IgE", "IgG4")
+    labels <- if (!is.null(example_channels())) example_channels() else default_channel_labels(channels)
 
     tagList(
       tags$p(sprintf("%d channel%s detected in these files.",
@@ -268,8 +279,9 @@ output$normalization_method_description <- renderUI({
       lapply(seq_along(channels), function(i) {
         textInput(
           paste0("ch_label_", channels[i]),
-          dark_label(paste0("Channel ", channels[i], ":")),
-          value = if (i <= length(legacy) && length(channels) == 2) legacy[i] else paste0("Ch", channels[i])
+          dark_label(tagList(tags$span(class = "channel-dot", style = paste0("background:", channel_color(channels, i))),
+                             paste0("Channel ", channels[i], ":"))),
+          value = labels[i]
         )
       })
     )
@@ -285,8 +297,17 @@ output$normalization_method_description <- renderUI({
       # Show processing notification
       showNotification("Extracting analyte IDs from files...", type = "message", duration = 2)
       
-      analytes <- get_unique_analytes(files)
+      analytes <- run_step("UPLOAD", sprintf("reading spot names from %d files", length(files)),
+        get_unique_analytes(files),
+        hint = "Every file must be a scanner export with an ID (or Name) column; remove files that are not.",
+        done = function(a) list(analytes = length(a), peptides = sum(grepl("(^|_)p[ _.-]?\\d+_", a)),
+                                other_spots = utils::head(a[!grepl("(^|_)p[ _.-]?\\d+_", a)], 12)))
+      if (is.null(analytes)) return()
       available_analytes(analytes)
+      ch <- tryCatch(detected_channels(), error = function(e) character(0))
+      log_step("UPLOAD", "Channels detected", channels = ch,
+               silent = tryCatch(silent_array_channels(first_array()), error = function(e) NULL),
+               default_labels = default_channel_labels(ch))
       
       # Group similar analytes for easier selection
       # Find base names (e.g., PBS_1X from PBS_1X_1, PBS_1X_2)
@@ -525,133 +546,69 @@ output$normalization_method_description <- renderUI({
   
 ##### Preprocesado de datos ####
   observeEvent(input$process_button, {
-    req(input$input_mode == "raw")
-    req(path1())
-    req(input$negative_controls)
-    
-    if (length(input$negative_controls) == 0) {
-      showNotification("Please select at least one negative control", type = "error")
-      return()
-    }
-    
-    # Expand control selections (handle _ALL groups)
-    neg_controls <- expand_control_selection(input$negative_controls, available_analytes())
-    pos_controls <- expand_control_selection(input$positive_controls, available_analytes())
-    
-    if (length(neg_controls) == 0) {
-      showNotification("No valid negative controls after expansion", type = "error")
-      return()
-    }
-    
-    files <- list_array_files(path1())
-    
-    use_channels <- selected_channels()
-    if (length(use_channels) == 0) {
-      showNotification("Select at least one channel to analyse.", type = "error")
+    # Every reason not to start is logged and shown: a silent req() here made
+    # the button look broken when, e.g., no negative control was selected.
+    files <- if (nzchar(path1())) list_array_files(path1()) else character(0)
+    use_channels <- tryCatch(selected_channels(), error = function(e) character(0))
+    problem <- if (!identical(input$input_mode, "raw")) "the input mode is not 'Raw scanner files' (Step 1)"
+      else if (length(files) == 0) "no scan files have been uploaded (Step 2)"
+      else if (length(input$negative_controls) == 0) "no negative control is selected (Step 3)"
+      else if (length(use_channels) == 0) "no channel is ticked (Step 3)"
+    neg_controls <- if (is.null(problem)) expand_control_selection(input$negative_controls, available_analytes())
+    if (is.null(problem) && length(neg_controls) == 0) problem <- "the negative controls selected are not spots of these files"
+    if (!is.null(problem)) {
+      log_step("NORMALIZE", "Start refused", level = "WARN", why = problem)
+      showNotification(paste("Cannot start the normalization:", problem), type = "error", duration = 8)
       return()
     }
 
-    withProgress(message = 'Processing files...', value = 0, {
-      ch_labels <- channel_labels()
-      
-      regex_pattern <- if(nchar(input$neg_ctrl_regex) > 0) input$neg_ctrl_regex else NULL
-      
-      showNotification(
-        paste("Using", length(neg_controls), "negative controls:", 
-              paste(head(neg_controls, 3), collapse = ", "), 
-              if(length(neg_controls) > 3) "..." else ""),
-        type = "message",
-        duration = 5
-      )
-      
-      # Get positive controls
-      pos_controls <- if (!is.null(input$positive_controls) && length(input$positive_controls) > 0) {
-        input$positive_controls
-      } else {
-        NULL
-      }
-      
-      pos_regex_pattern <- if (!is.null(input$positive_controls_regex) && nchar(input$positive_controls_regex) > 0) {
-        input$positive_controls_regex
-      } else {
-        NULL
-      }
-      
-      if (!is.null(pos_controls) && length(pos_controls) > 0) {
-        showNotification(
-          paste("Excluding", length(pos_controls), "positive controls from ML analysis:", 
-                paste(head(pos_controls, 3), collapse = ", "), 
-                if(length(pos_controls) > 3) "..." else ""),
-          type = "message",
-          duration = 5
+    ch_labels <- channel_labels()
+    pos_controls <- if (length(input$positive_controls) > 0) input$positive_controls else NULL
+    regex_pattern <- if (nzchar(input$neg_ctrl_regex %||% "")) input$neg_ctrl_regex else NULL
+    pos_regex_pattern <- if (nzchar(input$positive_controls_regex %||% "")) input$positive_controls_regex else NULL
+    inter <- isTRUE(input$enable_inter_norm)
+
+    result <- withProgress(message = "Processing files...", value = 0, run_step(
+      "NORMALIZE", sprintf("normalising %d arrays", length(files)),
+      negative_controls = neg_controls, positive_controls = pos_controls,
+      channels = paste0(use_channels, "=", ch_labels[use_channels]),
+      spot_value = input$spot_metric %||% "ratio", intra_sample = input$normalization_method,
+      inter_sample = if (inter) input$inter_norm_method else "off", imputation = input$imputation_method,
+      hint = "Check the control selection and that every file is an export of the same slide layout.",
+      done = function(r) list(samples = nrow(r$data), features = ncol(r$data) - 1,
+                              spots_for_qc = nrow(r$qc), normalization_improved = r$diag$improved),
+      {
+        out <- process_microarray_batch(
+          files, input$normalization_method,
+          negative_controls = neg_controls, negative_controls_pattern = regex_pattern,
+          positive_controls = pos_controls, positive_controls_pattern = pos_regex_pattern,
+          channel_labels = ch_labels, channels = use_channels,
+          spot_metric = input$spot_metric %||% "ratio", return_qc = TRUE,
+          progress_callback = function(i, total, name) incProgress(1 / total, detail = paste("Sample", name, "complete"))
         )
-      }
-      
-      # Process with new dual-channel support
-      data <- process_microarray_batch(
-        files, 
-        input$normalization_method,
-        negative_controls = neg_controls,
-        negative_controls_pattern = regex_pattern,
-        positive_controls = pos_controls,
-        positive_controls_pattern = pos_regex_pattern,
-        channel_labels = ch_labels,
-        channels = use_channels,
-        spot_metric = if (is.null(input$spot_metric)) "ratio" else input$spot_metric,
-        return_qc = TRUE,
-        progress_callback = function(i, total, name) {
-          incProgress(1/total, detail = paste("Sample", name, "complete"))
-        }
-      )
-      
+        data <- out$data
+        validation <- validate_expression_matrix(data, min_samples = 1, min_features = 1)
+        if (!validation$valid) stop(validation$message, call. = FALSE)
+        if (inter) data <- apply_inter_sample_normalization(data, method = input$inter_norm_method)
+        # Diagnostic against the RAW spot signal: did the whole normalization
+        # leave the arrays on a common scale?
+        list(data = data, qc = out$qc, diag = normalization_diagnostics(raw_peptide_matrix(out$qc), data))
+      }))
+    if (is.null(result)) return()
 
-      
-      qc_spot_data(data$qc)
-      data <- data$data
-
-      # VALIDATE processed data before continuing
-      validation <- validate_expression_matrix(data, min_samples = 1, min_features = 1)
-
-      if (!validation$valid) {
-        showNotification(
-          paste("Processing failed:", validation$message),
-          type = "error",
-          duration = 10
-        )
-        return()
-      }
-      
-      if (input$enable_inter_norm) {
-        data <- apply_inter_sample_normalization(data, method = input$inter_norm_method)
-      }
-
-      # Diagnostic against the RAW spot signal, not against the intermediate:
-      # the question is whether the whole normalization left arrays on a common
-      # scale, and dividing each array by its own control spread can undo that.
-      diagnostics <- normalization_diagnostics(raw_peptide_matrix(qc_spot_data()), data)
-      norm_diagnostics(diagnostics)
-
-      if (!diagnostics$improved) {
-        showNotification(
-          HTML(paste0("<strong>Check the normalization.</strong><br>", diagnostics$message)),
-          type = "warning", duration = 14
-        )
-      }
-
-      processed_data(data)
-      
-      # Success notification
-      showNotification(
-        HTML(paste0(
-          "<strong>Processing Complete!</strong><br>",
-          "Samples: ", nrow(data), "<br>",
-          "Features: ", ncol(data) - 1, "<br>",
-          "Channels: ", paste(ch_labels, collapse = ", ")
-        )),
-        type = "message",
-        duration = 8
-      )
-    })
+    qc_spot_data(result$qc)
+    norm_diagnostics(result$diag)
+    if (!result$diag$improved) {
+      log_step("NORMALIZE", "Arrays are not on a common scale after normalization", level = "WARN",
+               why = result$diag$message, hint = "Enable inter-sample normalization or review the negative controls")
+      showNotification(HTML(paste0("<strong>Check the normalization.</strong><br>", result$diag$message)),
+                       type = "warning", duration = 14)
+    }
+    processed_data(result$data)
+    showNotification(HTML(paste0("<strong>Processing complete</strong><br>Samples: ", nrow(result$data),
+                                 "<br>Features: ", ncol(result$data) - 1,
+                                 "<br>Channels: ", paste(ch_labels[use_channels], collapse = ", "))),
+                     type = "message", duration = 8)
   })
   
   # ===== Validate processed matrix upload =====
@@ -694,27 +651,28 @@ output$normalization_method_description <- renderUI({
     # Use advanced options if enabled
     use_advanced <- !is.null(input$toggle_advanced_upload) && input$toggle_advanced_upload > 0
     
-    if (ext %in% c("xlsx", "xls")) {
-      df <- readxl::read_excel(input$db_fileinput$datapath)
-      # read.csv sanitizes names by default; read_excel does not. Column names
-      # end up inside model formulas, where R evaluates them as code.
-      names(df) <- make.names(names(df), unique = TRUE)
-    } else if (ext == "csv") {
-      # Apply advanced CSV options if available
-      if (use_advanced) {
-        df <- read.csv(
-          input$db_fileinput$datapath,
-          sep = if (!is.null(input$csv_separator)) input$csv_separator else ",",
-          header = if (!is.null(input$csv_header)) input$csv_header else TRUE,
-          fileEncoding = if (!is.null(input$csv_encoding)) input$csv_encoding else "UTF-8"
-        )
-      } else {
-        df <- read.csv(input$db_fileinput$datapath)
-      }
-    } else {
+    if (!tolower(ext) %in% c("xlsx", "xls", "csv")) {
+      log_step("CLINICAL", "Upload refused", level = "WARN", file = input$db_fileinput$name, why = "unsupported format")
       showNotification("Unsupported file format. Use .csv or .xlsx", type = "error")
       return()
     }
+    df <- run_step("CLINICAL", paste("reading", input$db_fileinput$name),
+      file_type = ext, advanced_options = use_advanced,
+      hint = "Save the table as .csv (comma separated, UTF-8) or .xlsx with the column names in the first row.",
+      if (tolower(ext) %in% c("xlsx", "xls")) {
+        d <- readxl::read_excel(input$db_fileinput$datapath)
+        # read.csv sanitizes names by default; read_excel does not. Column names
+        # end up inside model formulas, where R evaluates them as code.
+        names(d) <- make.names(names(d), unique = TRUE)
+        as.data.frame(d)
+      } else if (use_advanced) {
+        read.csv(input$db_fileinput$datapath,
+                 sep = if (!is.null(input$csv_separator)) input$csv_separator else ",",
+                 header = if (!is.null(input$csv_header)) input$csv_header else TRUE,
+                 fileEncoding = if (!is.null(input$csv_encoding)) input$csv_encoding else "UTF-8")
+      } else {
+        read.csv(input$db_fileinput$datapath)
+      })
 
     if (!is.null(df) && nrow(df) > 0) {
       # Clean sample IDs: remove file extensions (.csv, .txt, etc.)
@@ -728,8 +686,20 @@ output$normalization_method_description <- renderUI({
                        selected = colnames(df)[1])
 
       # Store original database
+      clinical_keep(NULL)
       database(df)
       database_edited(df)
+      arrays <- if (nzchar(path1())) tools::file_path_sans_ext(basename(list_array_files(path1()))) else character(0)
+      ids <- as.character(df[[id_col]])
+      log_step("CLINICAL", "Clinical table loaded", file = input$db_fileinput$name, rows = nrow(df),
+               columns = names(df), id_column = id_col,
+               ids_matching_arrays = if (length(arrays)) sum(ids %in% arrays) else NULL,
+               arrays_without_row = if (length(arrays)) setdiff(arrays, ids) else NULL,
+               rows_without_array = if (length(arrays)) setdiff(ids, arrays) else NULL)
+      if (length(arrays) && sum(ids %in% arrays) < length(arrays)) {
+        log_step("CLINICAL", "Some arrays have no clinical row and will be dropped from every comparison", level = "WARN",
+                 hint = "The id column must equal the scan file names without extension")
+      }
       metadata_render_trigger(metadata_render_trigger() + 1)
 
       showNotification(
@@ -738,10 +708,42 @@ output$normalization_method_description <- renderUI({
         duration = 3
       )
     } else {
+      if (!is.null(df)) log_step("CLINICAL", "Clinical table is empty", level = "WARN", file = input$db_fileinput$name)
       showNotification("Error: Database is empty or could not be read", type = "error")
     }
   })
   
+  # ===== Clinical column picker =====
+  # One chip per column with its type and missing values; unticked columns are
+  # dropped from active_database(), so no selector or model ever sees them.
+  output$clinical_columns_ui <- renderUI({
+    df <- database_edited()
+    req(df)
+    cols <- setdiff(names(df), c("id", input$sample_id_col))
+    req(length(cols) > 0)
+    describe <- function(v) paste0(if (is.numeric(v)) "numeric" else paste(dplyr::n_distinct(v, na.rm = TRUE), "levels"),
+                                   if (anyNA(v)) paste0(" · ", sum(is.na(v)), " missing") else "")
+    keep <- if (is.null(isolate(clinical_keep()))) cols else intersect(isolate(clinical_keep()), cols)
+    tags$div(class = "clinical-cols",
+      tags$div(class = "clinical-cols-head",
+        tags$b("Columns to analyse"),
+        tags$span(class = "clinical-cols-count", textOutput("clinical_cols_count", inline = TRUE)),
+        actionLink("clinical_cols_all", "All"), actionLink("clinical_cols_none", "None")),
+      checkboxGroupInput("clinical_columns", NULL, inline = TRUE, selected = keep, choiceValues = cols,
+                         choiceNames = lapply(cols, function(c) tags$span(tags$b(c), tags$small(describe(df[[c]]))))))
+  })
+  output$clinical_cols_count <- renderText({
+    n_all <- length(setdiff(names(database_edited()), c("id", input$sample_id_col)))
+    sprintf("%d of %d selected", if (is.null(clinical_keep())) n_all else length(clinical_keep()), n_all)
+  })
+  observeEvent(input$clinical_columns, clinical_keep(input$clinical_columns %||% character(0)),
+               ignoreNULL = FALSE, ignoreInit = TRUE)
+  observeEvent(input$clinical_cols_all, {
+    cols <- setdiff(names(database_edited()), c("id", input$sample_id_col))
+    updateCheckboxGroupInput(session, "clinical_columns", selected = cols)
+  })
+  observeEvent(input$clinical_cols_none, updateCheckboxGroupInput(session, "clinical_columns", selected = character(0)))
+
   # ===== Rename sample ID column to 'id' when user confirms selection =====
   # Operates on the EDITED metadata so manual edits / find-replace are preserved.
   observeEvent(input$sample_id_col, {
@@ -950,39 +952,28 @@ output$normalization_method_description <- renderUI({
   
   #### Fin preprocesado ####
   
-  observeEvent(input$load_example_db, {
-    req(input$load_example_db)
-    
-    num_patients <- 130
-    
-    # Crear base de datos de ejemplo
-    example_db <- data.frame(
-      id = paste0("Patient_", 1:num_patients),
-      Age = sample(30:80, num_patients, replace = TRUE),
-      Sex = sample(c("Male", "Female"), num_patients, replace = TRUE),
-      CRP = runif(num_patients, 0.5, 15),  
-      IL6 = runif(num_patients, 2, 100),   
-      BMI = runif(num_patients, 18.5, 35),  
-      Glucose = runif(num_patients, 70, 140),  
-      Cholesterol = runif(num_patients, 150, 250),  
-      Blood_Pressure = runif(num_patients, 100, 180),  
-      Liver_Enzymes = runif(num_patients, 10, 50),  
-      Target = sample(c("Tratamiento 1", "Tratamiento 2", "Tratamiento 3"), num_patients, replace = TRUE)  
-    )
-    
-    if (nrow(example_db) > 0) {
-      database(example_db)
-      database_edited(example_db)
-      metadata_render_trigger(metadata_render_trigger() + 1)
+  # Built-in example: stage its arrays like an upload, load its clinical table
+  # and hand its peptide annotation to the protein tab.
+  observeEvent(input$load_example, {
+    key <- input$example_dataset
+    updateRadioButtons(session, "input_mode", selected = "raw")
+    example_channels(EXAMPLE_CHANNELS[[key]])
+    stage(stage_example_arrays(key, raw_upload_dir))
 
-      # Update column selectors
-      updateSelectInput(session, "sample_id_col", choices = colnames(example_db), selected = "id")
-      updateSelectInput(session, "replace_column", choices = colnames(example_db), selected = "Target")
-    } else {
-      stop("Error: No se pudo generar la base de datos de ejemplo.")
-    }
+    df <- read.csv(file.path(example_dir(key), "clinical.csv"))
+    clinical_keep(NULL)
+    database(df)
+    database_edited(df)
+    metadata_render_trigger(metadata_render_trigger() + 1)
+    updateSelectInput(session, "sample_id_col", choices = colnames(df), selected = "id")
+    updateSelectInput(session, "replace_column", choices = colnames(df), selected = "Group")
+    example_annotation(file.path(example_dir(key), "annotation.csv"))
+    log_step("UPLOAD", "Example dataset loaded", dataset = key, arrays = nrow(df), channels = EXAMPLE_CHANNELS[[key]])
+
+    showNotification(paste0("Example loaded: ", nrow(df), " arrays and their clinical data. ",
+                            "Continue with Step 3."), type = "message", duration = 6)
   })
-  
+
   ##### Mostrar estado de la base de datos clínica #####
   output$data_status_db <- renderText({
     if (is.null(database())) {
@@ -992,27 +983,13 @@ output$normalization_method_description <- renderUI({
     }
   })
   
-  observeEvent(input$load_example_pep, {
-    req(input$load_example_pep)
-    
-    # Generate synthetic peptide data
-    example_pep <- generate_synthetic_peptide_data(
-      num_patients = 130,
-      num_peptides = 180,
-      num_markers = 15,
-      database = database()
-    )
-    
-    processed_data(example_pep)
-  })
-  
 
   # ===== Finish Preprocess Button: Switch to Peptide Tab =====
   observeEvent(input$finish_preprocess, {
-    req(processed_data())
-    
-    # Check that data is ready
+    # Check that data is ready (logged: a silent stop made the button look dead)
     if (is.null(processed_data()) || nrow(processed_data()) == 0) {
+      log_step("PREPROCESS", "Finish refused", level = "WARN", why = "no processed matrix yet",
+               hint = "Run Step 4 (Start Normalization Process) first")
       showNotification(
         "No expression data available. Please process your data first.",
         type = "error",
@@ -1022,6 +999,7 @@ output$normalization_method_description <- renderUI({
     }
     
     if (is.null(database_edited()) || nrow(database_edited()) == 0) {
+      log_step("PREPROCESS", "Finish refused", level = "WARN", why = "no clinical table", hint = "Upload it in Step 5")
       showNotification(
         "No clinical metadata available. Please upload clinical data.",
         type = "warning",
@@ -1042,29 +1020,22 @@ output$normalization_method_description <- renderUI({
       duration = 5
     )
     
+    db <- active_database()
+    pd <- processed_data()
+    log_step("PREPROCESS", "Preprocessing finished", samples = nrow(pd), features = ncol(pd) - 1,
+             samples_with_clinical_row = sum(pd$id %in% db$id), clinical_columns_used = setdiff(names(db), "id"),
+             missing_values = sum(is.na(pd[, -1])))
     # Switch to Peptide tab
-    updateTabsetPanel(session, inputId = NULL, selected = "Peptide")
+    updateTabsetPanel(session, "main_tabs", selected = "Peptide finder")
   })
   
   ## Peptide tab - Updated to use processed_data from both RAW and processed modes
   # Raw analysis matrix BEFORE imputation (still contains NAs from flagged spots).
   # Kept separate so the Data Overview can report missingness honestly.
   raw_pepdata <- reactive({
-    # Check if we have processed data from either mode
-    if (!is.null(processed_data())) {
-      data <- processed_data()
-    }
-    # Fallback: Generate synthetic example data
-    else if (input$load_example_pep > 0) {
-      data <- generate_synthetic_peptide_data(
-        num_patients = 130,
-        num_peptides = 180,
-        num_markers = 15,
-        database = database()
-      )
-    } else {
-      return(NULL)
-    }
+    # Processed data from either mode (built-in examples arrive as RAW arrays)
+    data <- processed_data()
+    if (is.null(data)) return(NULL)
 
     # Clean column names for R compatibility
     colnames(data) <- make.names(colnames(data))
@@ -1145,7 +1116,7 @@ output$normalization_method_description <- renderUI({
       ht_list <- NULL
       if (!is.null(iso$ige) && ncol(iso$ige) > 0) {
         ht_ige <- ComplexHeatmap::Heatmap(
-          iso$ige, name = "IgE",
+          iso$ige, name = iso$names[1],
           col = ige_colors,
           cluster_rows = TRUE, cluster_columns = TRUE, border = FALSE,
           show_column_names = FALSE,
@@ -1162,7 +1133,7 @@ output$normalization_method_description <- renderUI({
       }
       if (!is.null(iso$igg4) && ncol(iso$igg4) > 0) {
         ht_igg4 <- ComplexHeatmap::Heatmap(
-          iso$igg4, name = "IgG4",
+          iso$igg4, name = iso$names[2],
           col = igg4_colors,  
           cluster_rows = TRUE, cluster_columns = TRUE, border = FALSE,
           show_column_names = FALSE,
@@ -1217,13 +1188,13 @@ output$normalization_method_description <- renderUI({
   })
   
   # Isotype donut chart
-  output$isotype_donut <- renderGirafe({
+  output$isotype_donut <- renderChart({
     req(peptide_summary())
     create_isotype_donut_chart(peptide_summary()$isotype_summary)
   })
   
   # Expression distribution plot
-  output$expression_dist_plot <- renderGirafe({
+  output$expression_dist_plot <- renderChart({
     req(pepdata())
     create_expression_distribution_plot(pepdata())
   })
@@ -1368,35 +1339,41 @@ output$normalization_method_description <- renderUI({
   
 
   tests <- eventReactive(input$run_analysis_1, {
-    req(input$analysis_type == "Comparison between groups (Classification)")  
+    req(input$analysis_type == "Comparison between groups (Classification)")
     req(pepdata(), active_database(), input$stats)
-    
-    # Always use Linear Model-based differential analysis
-    lm_results <- perform_lm_differential_analysis(
-      peptide_data = pepdata(),
-      clinical_data = active_database(),
-      target_variable = input$stats,
-      test_method = "lm"  # Always LM as primary method
-    )
-    
-    # If contrast test is requested, also run it
-    if (!is.null(input$add_contrast_test) && input$add_contrast_test == TRUE) {
-      contrast_results <- perform_lm_differential_analysis(
-        peptide_data = pepdata(),
-        clinical_data = active_database(),
-        target_variable = input$stats,
-        test_method = input$contrast_method  # Will be "anova" or "kruskal"
-      )
-      
-      # Add contrast p-values as additional columns
-      lm_results <- lm_results %>%
-        left_join(
-          contrast_results %>% select(peptide, contrast_p = p, contrast_p.adj = p.adj),
-          by = "peptide"
-        )
+    groups <- table(active_database()[[input$stats]][active_database()$id %in% pepdata()$id])
+    if (length(groups) < 2) {
+      log_step("STATS", "Analysis refused", level = "WARN", target = input$stats, groups = names(groups),
+               why = "the target has fewer than two groups among the samples with arrays",
+               hint = "Choose a variable with at least two groups, or check that the clinical ids match the arrays")
+      showNotification(paste0("'", input$stats, "' has fewer than two groups among the analysed samples."), type = "error", duration = 10)
+      req(FALSE)
     }
-    
-    return(lm_results)
+
+    res <- run_step("STATS", paste("differential analysis by", input$stats),
+      target = input$stats, groups = paste0(names(groups), "=", as.integer(groups)),
+      peptides = ncol(pepdata()) - 1, model = "lm per peptide + BH FDR",
+      contrast_test = if (isTRUE(input$add_contrast_test)) input$contrast_method,
+      hint = "Each group needs at least two samples; a numeric target should be grouped first.",
+      done = function(r) list(tested = nrow(r), fdr_below_0.05 = sum(r$p.adj < 0.05, na.rm = TRUE)),
+      {
+        lm_results <- perform_lm_differential_analysis(
+          peptide_data = pepdata(), clinical_data = active_database(),
+          target_variable = input$stats, test_method = "lm"
+        )
+        # Optional second test, joined as extra p-value columns
+        if (isTRUE(input$add_contrast_test)) {
+          contrast_results <- perform_lm_differential_analysis(
+            peptide_data = pepdata(), clinical_data = active_database(),
+            target_variable = input$stats, test_method = input$contrast_method
+          )
+          lm_results <- lm_results %>%
+            left_join(contrast_results %>% select(peptide, contrast_p = p, contrast_p.adj = p.adj), by = "peptide")
+        }
+        lm_results
+      })
+    req(res)
+    res
   })
   
   tests_filtered <- reactive({
@@ -1550,90 +1527,14 @@ output$normalization_method_description <- renderUI({
   })
   
   
-  output$stats_plot <- renderGirafe({
-    req(tests_filtered(), input$stats_plot_var)
-    
-    # Validate data availability
-    peps <- pepdata()
-    tmp1 <- active_database()
-    
-    if (is.null(peps) || is.null(tmp1)) {
-      return(NULL)
-    }
-    
-    if (nrow(peps) == 0 || nrow(tmp1) == 0) {
-      return(NULL)
-    }
-    
-    # Safe join with validation
-    tryCatch({
-      meta <- safe_join(peps, tmp1, by = "id", join_type = "inner")
-    }, error = function(e) {
-      showNotification(
-        paste("Cannot create plot: sample IDs don't match between expression and clinical data. Error:", e$message),
-        type = "warning",
-        duration = 10
-      )
-      return(NULL)
-    })
-    
-    if (nrow(meta) == 0) {
-      showNotification("No matching samples between expression and clinical data", type = "warning")
-      return(NULL)
-    }
-    
-    testt <- tests_filtered()
-    df <- meta
-    df <- df %>% rename(target = !!rlang::sym(input$stats)) %>% dplyr::select(id,target)
-    df2 <- meta %>% dplyr::select(1:ncol(peps))
-    df3 <- df %>% inner_join(df2, by = "id") %>% dplyr::select(-id) %>% 
-      pivot_longer(names_to = "pep", values_to = "Expression", cols = -target)
-    
-    # Filter non-finite values
-    df3 <- df3 %>% dplyr::filter(is.finite(Expression))
-    
-    if (nrow(df3) == 0) {
-      return(NULL)
-    }
-    
-    # Validate that stats_plot_var exists in data
-    if (!input$stats_plot_var %in% unique(df3$pep)) {
-      return(NULL)
-    }
-    
-    # Prepare data with tooltips
-    plot_data <- df3 %>% 
-      filter(pep == input$stats_plot_var) %>%
-      mutate(
-        tooltip = paste0(
-          "<b>", target, "</b><br/>",
-          "Expression: ", round(Expression, 2)
-        ),
-        data_id = paste0(target, "_", row_number())
-      )
-    
-    # Create ggplot with interactive geoms
-    p <- ggplot(plot_data, aes(x = as.factor(target), y = Expression, color = target,
-                                fill = target)) +
-      geom_point_interactive(aes(tooltip = tooltip, data_id = data_id),
-                             size = 2,
-                             alpha = 0.7,
-                             position = position_jitter(width = .1)) +
-      geom_boxplot(lwd = 0.8,
-                   width = 0.3,
-                   alpha = 0,
-                   outlier.color = "red",
-                   outlier.fill = "red",
-                   outlier.size = 5) +
-      labs(subtitle = input$stats_plot_var) +
-      xlab("") +
-      stat_boxplot(geom = "errorbar", width = 0.2, alpha = .2) +
-      geom_violin(lwd = 0.5, width = .6, alpha = .6) +
-      theme_microarrai() +
-      scale_color_microarrai() +
-      scale_fill_microarrai()
-    
-    apply_girafe(p, width_svg = 10, height_svg = 7)
+  output$stats_plot <- renderChart({
+    req(tests_filtered(), input$stats_plot_var, input$stats)
+    meta <- tryCatch(safe_join(pepdata(), active_database(), by = "id", join_type = "inner"), error = function(e) NULL)
+    if (is.null(meta) || nrow(meta) == 0) return(chart_message("No sample IDs match between the expression matrix and the clinical table."))
+    req(all(c(input$stats, input$stats_plot_var) %in% names(meta)))
+    d <- dplyr::filter(meta, is.finite(.data[[input$stats_plot_var]]), !is.na(.data[[input$stats]]))
+    chart_groupdist(d[[input$stats_plot_var]], d[[input$stats]], d$id, ylab = "Expression",
+                    title = input$stats_plot_var, subtitle = paste("Grouped by", input$stats))
   })
   #################### Logistic regression ####################################
   
@@ -1677,9 +1578,12 @@ output$normalization_method_description <- renderUI({
       return(NULL)
     }
     
-    perfor <- data.frame()
     nlevels_target <- nlevels(as.factor(df3$target))
-    
+    perfor <- run_step("STATS", sprintf("per-peptide %s and AUC for %d candidates",
+                                         if (nlevels_target > 2) "multinomial regression" else "logistic regression", nrow(testt)),
+      hint = "A peptide whose values are constant within a group cannot be modelled; lower the FDR filter or check the data.",
+      done = function(r) list(peptides = nrow(r), mean_auc = mean(r$AUC, na.rm = TRUE)), {
+    perfor <- data.frame()
     for (i in testt$peptide) {
       M <- df3 %>% filter(pep == i) %>% filter(!is.na(Expression))
       
@@ -1716,7 +1620,9 @@ output$normalization_method_description <- renderUI({
         Recall = round(metrics$recall, 2)
       ))
     }
-    
+    perfor
+    })
+    req(perfor)
     perfor %>% rename(Peptide = i)
   })
   
@@ -1802,6 +1708,26 @@ output$normalization_method_description <- renderUI({
   })
   
   # Tabla base para volcano (1 o 2 isotipos)
+  # Isotypes (channel prefixes) present in the analysis matrix. Positional names
+  # from raw arrays (IgE_p_9_k.cas) are read by discover_isotypes(); otherwise
+  # any prefix shared by several columns counts, as long as there are 2+ of them
+  # (a lone shared prefix such as "Peptide_1" is a naming scheme, not an isotype).
+  peptide_isotypes <- reactive({
+    req(pepdata())
+    cols <- setdiff(names(pepdata()), "id")
+    isos <- discover_isotypes(cols)
+    if (length(isos) > 0) return(isos)
+    pre <- table(sub("_.*", "", cols[grepl("_", cols)]))
+    if (sum(pre >= 2) >= 2) names(pre)[pre >= 2] else character(0)
+  })
+
+  output$volcano_isotypes_ui <- renderUI({
+    isos <- peptide_isotypes()
+    if (length(isos) == 0) return(NULL)
+    checkboxGroupInput("volcano_isotypes", dark_label("Select Isotypes:"),
+                       choices = isos, selected = isos)
+  })
+
   volcano_tbl <- reactive({
     req(pepdata(), active_database(),
         input$volcano_group_var, input$volcano_level_a, input$volcano_level_b)
@@ -1822,21 +1748,16 @@ output$normalization_method_description <- renderUI({
     is_num   <- vapply(pepdata()[pep_cols], is.numeric, logical(1))
     pep_cols <- pep_cols[is_num]
     
-    # detección de prefijos
-    has_ige  <- any(grepl("^IgE_",  pep_cols))
-    has_igg4 <- any(grepl("^IgG4_", pep_cols))
-    has_iso  <- has_ige || has_igg4
-    
+    # isotipos detectados en los datos (prefijo de canal: IgE_, IgG4_, IgA_...)
+    isos    <- peptide_isotypes()
+    has_iso <- length(isos) > 0
+
     # columnas elegidas
     if (has_iso) {
-      # respetar el filtro del UI (mezclar = seleccionar los dos)
-      iso_pat <- paste0("^(", paste(input$volcano_isotypes, collapse = "|"), ")_")
-      chosen  <- grep(iso_pat, pep_cols, value = TRUE)
-      if (length(chosen) == 0) {
-        # si el usuario desmarca todo, no bloqueamos: usamos todas las que tengan prefijo
-        chosen <- c(grep("^IgE_", pep_cols,  value = TRUE),
-                    grep("^IgG4_", pep_cols, value = TRUE))
-      }
+      # respetar el filtro del UI; si el usuario desmarca todo, usamos todos los isotipos
+      shown   <- intersect(input$volcano_isotypes, isos)
+      if (length(shown) == 0) shown <- isos
+      chosen  <- grep(paste0("^(", paste(shown, collapse = "|"), ")_"), pep_cols, value = TRUE)
       long <- dat %>%
         dplyr::select(id, .grp, dplyr::all_of(chosen)) %>%
         tidyr::pivot_longer(cols = dplyr::all_of(chosen),
@@ -1901,7 +1822,7 @@ output$normalization_method_description <- renderUI({
     lfcThr   = input$volcano_lfc_thr,
     yaxis    = if (is.null(input$volcano_yaxis)) "padj" else input$volcano_yaxis,
     facet    = isTRUE(input$volcano_facet_isotype),
-    isotypes = as.list(if (is.null(input$volcano_isotypes)) c("IgE", "IgG4") else input$volcano_isotypes)
+    isotypes = as.list(if (is.null(input$volcano_isotypes)) peptide_isotypes() else input$volcano_isotypes)
   )
 
   observeEvent(volcano_tbl(), {
@@ -1967,152 +1888,23 @@ output$normalization_method_description <- renderUI({
   
   ####################### ROC PLOTS ###########################################
   
-  output$rocs_plot <- renderPlot({
-    req(tests_filtered(), input$stats_plot_var)
-    
-    peps <- pepdata()
-    tmp1 <- active_database()
-    meta <- peps %>% inner_join(tmp1, by = "id")
-    testt <- tests_filtered()
-    df <- meta
-    df <- df %>% rename(target = !!rlang::sym(input$stats)) %>% dplyr::select(id,target)
-    df2 <- meta %>% dplyr::select(1:ncol(peps))
-    df3 <- df %>% inner_join(df2, by = "id") %>% dplyr::select(-id) %>% 
-      pivot_longer(names_to = "pep", values_to = "Expression", cols = -target) %>% 
-      mutate(target = as.factor(target))
-    
-    # Validate that stats_plot_var exists in data
-    if (!input$stats_plot_var %in% unique(df3$pep)) {
-      plot.new()
-      text(0.5, 0.5, "Selected peptide not found in data", cex = 1.5)
-      return()
-    }
-    
-    df3 <- df3 %>%
-      filter(pep == input$stats_plot_var) %>%
-      filter(!is.na(Expression))
-    
-    # Validate minimum data
-    if (nrow(df3) < 5) {
-      plot.new()
-      text(0.5, 0.5, "Insufficient data for ROC curve", cex = 1.5)
-      return()
-    }
-    
-    nlevels_target <- nlevels(df3$target)
-    
-    # Use modular regression functions
-    if (nlevels_target > 2) {
-      # Multinomial regression
-      result <- tryCatch({
-        fit_multinomial_regression(
-          expression_data = df3$Expression,
-          target = df3$target
-        )
-      }, error = function(e) {
-        plot.new()
-        text(0.5, 0.5, paste("Error fitting model:", e$message), cex = 1.2)
-        return(NULL)
-      })
-      
-      if (is.null(result)) return()
-      
-      # Calculate ROC curve data
-      roc_data <- tryCatch({
-        calculate_roc_curve(
-          actual = df3$target,
-          probabilities = result$probabilities
-        )
-      }, error = function(e) {
-        plot.new()
-        text(0.5, 0.5, paste("Error calculating ROC:", e$message), cex = 1.2, col = "red")
-        return(NULL)
-      })
-      
-      if (is.null(roc_data) || nrow(roc_data) == 0) {
-        plot.new()
-        text(0.5, 0.5, "No ROC data generated", cex = 1.5)
-        return()
-      }
-      
-      # Ensure numeric columns
-      roc_data$specificity <- as.numeric(roc_data$specificity)
-      roc_data$sensitivity <- as.numeric(roc_data$sensitivity)
-      
-      # Remove NA values
-      roc_data <- roc_data %>% 
-        filter(!is.na(specificity), !is.na(sensitivity))
-      
-      if (nrow(roc_data) == 0) {
-        plot.new()
-        text(0.5, 0.5, "No valid ROC data points", cex = 1.5)
-        return()
-      }
-      
-      # Plot multiclass ROC
-      plot_obj <- ggplot(roc_data, aes(x = 1 - specificity, y = sensitivity, color = class)) +
-        geom_line(size = 1.5, alpha = 0.8) +
-        geom_point(size = 2, alpha = 0.5) +
-        geom_abline(slope = 1, linetype = "dotted", color = "gray50") +
-        coord_fixed() +
-        theme_microarrai() +
-        labs(
-          color = "Class", 
-          title = "ROC Curves (One-vs-Rest)",
-          x = "1 - Specificity (FPR)",
-          y = "Sensitivity (TPR)"
-        ) +
-        scale_color_microarrai() +
-        scale_fill_microarrai() +
-        theme(
-          legend.position = "right",
-          plot.title = element_text(hjust = 0.5, face = "bold")
-        )
-      
-      print(plot_obj)
-      print(plot_obj)
-      plot_obj
-    } else {
-      # Binary GLM
-      result <- tryCatch({
-        fit_binary_glm(
-          expression_data = df3$Expression,
-          target = df3$target
-        )
-      }, error = function(e) {
-        plot.new()
-        text(0.5, 0.5, paste("Error fitting model:", e$message), cex = 1.2)
-        return(NULL)
-      })
-      
-      if (is.null(result)) return()
-      
-      # Validate probabilities
-      if (is.null(result$probabilities) || ncol(result$probabilities) < 2) {
-        plot.new()
-        text(0.5, 0.5, "Error: Invalid probability predictions", cex = 1.5)
-        return()
-      }
-      
-      # Calculate ROC curve data
-      roc_data <- calculate_roc_curve(
-        actual = df3$target,
-        probabilities = result$probabilities[, 2]
-      )
-      
-      # Plot using pROC for binary (static plot)
-      pROC::plot.roc(
-        df3$target, 
-        result$probabilities[, 2], 
-        percent = TRUE,
-        main = paste0("ROC Curve (AUC = ", round(roc_data$auc[1], 3), ")"),
-        add = FALSE, 
-        asp = NA, 
-        print.auc = TRUE,
-        col = MICROARRAI_COLORS[1],
-        lwd = 2
-      )
-    }
+  # ROC of the selected peptide on its own (in-sample, the same AUC as the
+  # results table). Two groups: one curve; more: one-vs-rest per group.
+  output$rocs_plot <- renderChart({
+    req(tests_filtered(), input$stats_plot_var, input$stats)
+    meta <- dplyr::inner_join(pepdata(), active_database(), by = "id")
+    req(all(c(input$stats, input$stats_plot_var) %in% names(meta)))
+    d <- data.frame(target = meta[[input$stats]], value = meta[[input$stats_plot_var]]) %>%
+      dplyr::filter(is.finite(value), !is.na(target)) %>%
+      dplyr::mutate(target = droplevels(factor(target)))
+    k <- nlevels(d$target)
+    if (nrow(d) < 5 || k < 2) return(chart_message("A ROC curve needs at least 5 samples spread over two or more groups."))
+    tryCatch({
+      fit <- if (k > 2) fit_multinomial_regression(d$value, d$target) else fit_binary_glm(d$value, d$target)
+      chart_roc(calculate_roc_curve(d$target, if (k > 2) fit$probabilities else fit$probabilities[, 2]),
+                title = input$stats_plot_var,
+                subtitle = if (k > 2) "One-vs-rest: one curve per group" else paste("Positive class:", levels(d$target)[2]))
+    }, error = function(e) chart_message(paste("The ROC curve could not be computed:", conditionMessage(e)), "error"))
   })
   
   
@@ -2140,38 +1932,27 @@ output$normalization_method_description <- renderUI({
     mean_f1 <- mean(results_data$F1, na.rm = TRUE)
     mean_accuracy <- mean(results_data$Accuracy, na.rm = TRUE)
     
-    # IgE/IgG4 breakdown (count only, no up/down without specific contrast)
-    ige_data <- results_data %>% filter(grepl("IgE", peptide))
-    igg4_data <- results_data %>% filter(grepl("IgG4", peptide))
-    
-    n_ige <- nrow(ige_data)
-    n_igg4 <- nrow(igg4_data)
-    
-    # Calculate mean AUC per isotype
-    ige_mean_auc <- if(n_ige > 0) round(mean(ige_data$AUC, na.rm = TRUE), 2) else 0
-    igg4_mean_auc <- if(n_igg4 > 0) round(mean(igg4_data$AUC, na.rm = TRUE), 2) else 0
-    
-    kpi_icons <- c("check-circle", "dna", "dna", "bullseye", "trophy", "chart-bar")
-    kpi_data <- list(
-      list(label = "Selected Peptides", value = total_selected, icon = kpi_icons[1]),
-      list(label = "IgE Peptides", 
-           value = n_ige,
-           subtitle = paste0("Mean AUC: ", ige_mean_auc),
-           icon = kpi_icons[2]),
-      list(label = "IgG4 Peptides", 
-           value = n_igg4,
-           subtitle = paste0("Mean AUC: ", igg4_mean_auc),
-           icon = kpi_icons[3]),
-      list(label = "Mean AUC", value = round(mean_auc, 2), icon = kpi_icons[4]),
-      list(label = "Mean F1", value = round(mean_f1, 2), icon = kpi_icons[5]),
-      list(label = "Mean Accuracy", value = round(mean_accuracy, 2), icon = kpi_icons[6])
+    # Breakdown per isotype found in the data (count only, no up/down without a contrast)
+    iso_kpis <- lapply(peptide_isotypes(), function(iso) {
+      d <- results_data[startsWith(results_data$peptide, paste0(iso, "_")), ]
+      list(label = paste(iso, "Peptides"), value = nrow(d), icon = "dna",
+           subtitle = paste0("Mean AUC: ", if (nrow(d) > 0) round(mean(d$AUC, na.rm = TRUE), 2) else 0))
+    })
+
+    kpi_data <- c(
+      list(list(label = "Selected Peptides", value = total_selected, icon = "check-circle")),
+      iso_kpis,
+      list(list(label = "Mean AUC", value = round(mean_auc, 2), icon = "bullseye"),
+           list(label = "Mean F1", value = round(mean_f1, 2), icon = "trophy"),
+           list(label = "Mean Accuracy", value = round(mean_accuracy, 2), icon = "chart-bar"))
     )
-    
+    kpi_width <- max(2, 12 %/% length(kpi_data))
+
     fluidRow(
       lapply(1:length(kpi_data), function(i) {
         kpi <- kpi_data[[i]]
         column(
-          width = 2,
+          width = kpi_width,
           div(
             style = paste0(
               "background: white;",
@@ -2217,44 +1998,12 @@ output$normalization_method_description <- renderUI({
   })
   
   # ====== RESULTS DONUT CHART ======
-  output$results_donut <- renderGirafe({
+  output$results_donut <- renderChart({
     req(results_filtered())
-    
-    results_data <- results_filtered()
-    
-    isotype_counts <- data.frame(
-      Isotype = c("IgE", "IgG4"),
-      Count = c(
-        sum(grepl("IgE", results_data$peptide)),
-        sum(grepl("IgG4", results_data$peptide))
-      )
-    ) %>%
-      mutate(
-        fraction = Count / sum(Count),
-        ymax = cumsum(fraction),
-        ymin = c(0, head(ymax, n = -1)),
-        percentage = round(fraction * 100, 1),
-        tooltip = paste0(
-          "<b>", Isotype, "</b><br/>",
-          "Count: ", Count, "<br/>",
-          "Percentage: ", percentage, "%"
-        ),
-        data_id = Isotype
-      )
-    
-    p <- ggplot(isotype_counts, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 2.5,
-                                     fill = Isotype, tooltip = tooltip, data_id = data_id)) +
-      geom_rect_interactive(color = "white", linewidth = 1.5) +
-      coord_polar(theta = "y") +
-      xlim(c(0, 4)) +
-      scale_fill_manual(values = c("IgE" = "#191c32", "IgG4" = "#667eea")) +
-      theme_void() +
-      theme(
-        legend.position = "bottom",
-        legend.title = element_blank()
-      )
-    
-    apply_girafe(p, width_svg = 4, height_svg = 4)
+    isos <- peptide_isotypes()
+    req(length(isos) > 0)
+    n <- vapply(isos, function(iso) sum(startsWith(results_filtered()$peptide, paste0(iso, "_"))), integer(1))
+    chart_donut(isos, n, isotype_colors(isos), center_label = "selected peptides")
   })
   
   # ====== RESULTS SUMMARY TEXT ======
@@ -2314,7 +2063,8 @@ output$normalization_method_description <- renderUI({
   })
   
   # ====== FUNNEL: estado global de selección ===================================
-  selected_biomarkers <- reactiveVal(character(0))
+  selected_biomarkers <- reactiveVal(character(0))   # candidates sent from the Peptide tab (ML input)
+  consensus_biomarkers <- reactiveVal(character(0))  # consensus sent from ML (protein maps, report)
   
   # Ranking combinando p.adj (↑ significancia) y AUC (↑ rendimiento)
   ml_ranked_peptides <- reactive({
@@ -2414,6 +2164,9 @@ output$normalization_method_description <- renderUI({
       return(NULL)
     }
     selected_biomarkers(sel)
+    log_step("SELECT", "Candidates sent to Machine Learning", n = length(sel), rule = input$ml_selection_method,
+             top_n = if (identical(input$ml_selection_method, "top_n")) input$ml_top_n,
+             auc_threshold = if (!identical(input$ml_selection_method, "top_n")) input$ml_auc_threshold, peptides = sel)
     showNotification(
       paste(length(sel), "biomarkers sent to Machine Learning tab."), 
       type = "message",
@@ -2527,7 +2280,7 @@ output$normalization_method_description <- renderUI({
       ht_list <- NULL
       if (!is.null(iso$ige) && ncol(iso$ige) > 0) {
         ht_ige <- ComplexHeatmap::Heatmap(
-          iso$ige, name = "IgE",
+          iso$ige, name = iso$names[1],
           col = ige_colors,
           cluster_rows = TRUE, cluster_columns = TRUE, border = FALSE,
           show_column_names = FALSE,
@@ -2544,7 +2297,7 @@ output$normalization_method_description <- renderUI({
       }
       if (!is.null(iso$igg4) && ncol(iso$igg4) > 0) {
         ht_igg4 <- ComplexHeatmap::Heatmap(
-          iso$igg4, name = "IgG4",
+          iso$igg4, name = iso$names[2],
           col = igg4_colors,
           cluster_rows = TRUE, cluster_columns = TRUE, border = FALSE,
           show_column_names = FALSE,
@@ -2610,49 +2363,25 @@ output$normalization_method_description <- renderUI({
   
   
   ########################## PLOT PCA ############################################
-  output$PCA_2d <- renderGirafe({
-    req(input$ml_use_pca)  # Only render if selected
-    
-    df <- meta_data_ML()
-    
-    # Use modular PCA function
-    pca_data <- df %>% dplyr::select(1: ncol(active_pepdata())) %>% dplyr::select(-id)
-    pca_result <- compute_pca(pca_data, center = TRUE, scale. = TRUE)
-    
-    # Get groups
-    groups <- extract_target_groups(df, active_target_var())
-    
-    # Calculate variance
-    variance <- calculate_pca_variance(stats::prcomp(pca_data, center = TRUE, scale. = TRUE))
-    var_pc1 <- round(variance[1], 1)
-    var_pc2 <- round(variance[2], 1)
-    
-    # Prepare plot data with tooltips
-    pca_df <- pca_result
-    pca_df$target <- groups
-    pca_df$sample_id <- df$id
-    pca_df$tooltip <- paste0(
-      "<b>Sample: ", pca_df$sample_id, "</b><br/>",
-      "Group: ", pca_df$target, "<br/>",
-      "PC1: ", round(pca_df$PC1, 2), "<br/>",
-      "PC2: ", round(pca_df$PC2, 2)
-    )
-    pca_df$data_id <- pca_df$sample_id
-    
-    p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = target, fill = target,
-                             tooltip = tooltip, data_id = data_id)) +
-      geom_point_interactive(size = 4, alpha = 0.8) +  
-      stat_ellipse(level = 0.95, alpha = 0.2) +  
-      labs(
-        x = paste0("PC1 (", var_pc1, "% Varianza)"),
-        y = paste0("PC2 (", var_pc2, "% Varianza)"),
-        title = "Análisis PCA"
-      ) +
-      theme_microarrai() +
-      scale_color_microarrai() +
-      scale_fill_microarrai()
-    
-    apply_girafe(p, width_svg = 10, height_svg = 7)
+  # Groups for the unsupervised plots; waits until the target exists in the data
+  ml_groups <- reactive({
+    req(active_target_var() %in% names(meta_data_ML()))
+    extract_target_groups(meta_data_ML(), active_target_var())
+  })
+
+  # One PCA (scaled, constant peptides dropped) behind the 2D and 3D views
+  pca_fit <- reactive({
+    X <- meta_data_ML() %>% dplyr::select(1:ncol(active_pepdata())) %>% dplyr::select(-id) %>% dplyr::select(where(is.numeric))
+    X[is.na(X)] <- 0
+    stats::prcomp(X[, vapply(X, function(v) stats::var(v) > 0, logical(1)), drop = FALSE], center = TRUE, scale. = TRUE)
+  })
+  pca_var <- reactive(round(100 * pca_fit()$sdev^2 / sum(pca_fit()$sdev^2), 1))
+
+  output$PCA_2d <- renderChart({
+    req(input$ml_use_pca)
+    s <- as.data.frame(pca_fit()$x); v <- pca_var(); g <- ml_groups(); id <- meta_data_ML()$id
+    chart_scatter(s$PC1, s$PC2, g, id, sample_tip(id, g, PC1 = s$PC1, PC2 = s$PC2),
+                  xlab = sprintf("PC1 (%s %% variance)", v[1]), ylab = sprintf("PC2 (%s %% variance)", v[2]))
   })
   
   PCA_mod <- reactive({
@@ -2665,41 +2394,12 @@ output$normalization_method_description <- renderUI({
   })
   
 
-  ellipsoid_PCA <- reactiveVal(FALSE)
-  surface_PCA <- reactiveVal("smooth")
-
-  observeEvent(input$toggle_ellipsoid_PCA, {
-    ellipsoid_PCA(!ellipsoid_PCA())
-  })
-  
-
-  observeEvent(input$toggle_surface_PCA, {
-    # Use modular toggle function
-    surface_PCA(toggle_surface_fit(surface_PCA()))
-  })
-  
-
-  output$d3_PCA <- renderRglwidget({
-    req(input$ml_use_pca)  # Only render if selected
-    # Get PCA coordinates and groups
-    pca <- PCA_mod()
-    groups <- extract_target_groups(meta_data_ML(), active_target_var())
-    
-    # Use modular 3D visualization function
-    create_3d_pca(
-      pca_coords = pca,
-      groups = groups,
-      variance = NULL,  # Could add variance calculation if needed
-      surface = !ellipsoid_PCA(),
-      ellipsoid = ellipsoid_PCA(),
-      fit = surface_PCA(),
-      surface_col = custom_palette
-    )
-  })
-  
-
-  output$current_params_PCA <- renderText({
-    paste("Ellipsoid:", ellipsoid_PCA(), "| Surface:", surface_PCA())
+  output$d3_PCA <- renderChart({
+    req(input$ml_use_pca)
+    s <- as.data.frame(pca_fit()$x); req(ncol(s) >= 3)
+    v <- pca_var(); g <- ml_groups(); id <- meta_data_ML()$id
+    chart_scatter3d(s$PC1, s$PC2, s$PC3, g, id, sample_tip(id, g, PC1 = s$PC1, PC2 = s$PC2, PC3 = s$PC3),
+                    labels = sprintf("PC%d (%s%%)", 1:3, v[1:3]))
   })
   
   ########################## PCoA dist.matrix ############################################
@@ -2732,149 +2432,55 @@ output$normalization_method_description <- renderUI({
   
   ########################## PLOT PCoA ############################################
   
-  output$PCoA_2d <- renderGirafe({
-    req(input$ml_use_pcoa)  # Only render if selected
-    # Use modular PCoA function
-    pcoa_coords <- perform_pcoa(pcoa_dist_matrix(), k = 2)
-    groups <- extract_target_groups(meta_data_ML(), active_target_var())
-    
-    positions <- pcoa_coords
-    positions$target <- groups
-    positions$sample_id <- meta_data_ML()$id
-    positions$tooltip <- paste0(
-      "<b>Sample: ", positions$sample_id, "</b><br/>",
-      "Group: ", positions$target, "<br/>",
-      "PCoA1: ", round(positions$pcoa1, 2), "<br/>",
-      "PCoA2: ", round(positions$pcoa2, 2)
-    )
-    positions$data_id <- positions$sample_id
-    
-    p <- positions %>%
-      ggplot(aes(x = pcoa1, y = pcoa2, color = target, fill = target,
-                 tooltip = tooltip, data_id = data_id)) +
-      geom_point_interactive(size = 4, alpha = 0.8) +
-      stat_ellipse(alpha = 0.2) +
-      labs(
-        title = "Principal Coordinates Analysis (PCoA)",
-        x = "PCoA Axis 1",
-        y = "PCoA Axis 2",
-        color = ""
-      ) +
-      theme_microarrai() +
-      scale_color_microarrai() +
-      scale_fill_microarrai()
-    
-    apply_girafe(p, width_svg = 10, height_svg = 7)
+  output$PCoA_2d <- renderChart({
+    req(input$ml_use_pcoa)
+    s <- perform_pcoa(pcoa_dist_matrix(), k = 2); g <- ml_groups(); id <- meta_data_ML()$id
+    chart_scatter(s$pcoa1, s$pcoa2, g, id, sample_tip(id, g, PCoA1 = s$pcoa1, PCoA2 = s$pcoa2),
+                  xlab = "PCoA axis 1", ylab = "PCoA axis 2")
   })
-  
 
-  ellipsoid_PCOA <- reactiveVal(FALSE)
-  surface_PCOA <- reactiveVal("smooth")
-  
-  observeEvent(input$toggle_ellipsoid_PCOA, {
-    ellipsoid_PCOA(!ellipsoid_PCOA())
-  })
-  
-  observeEvent(input$toggle_surface_PCOA, {
-    # Use modular toggle function
-    surface_PCOA(toggle_surface_fit(surface_PCOA()))
-  })
-  
-  output$PCoA_3d <- renderRglwidget({
-    req(input$ml_use_pcoa)  # Only render if selected
-    # Use modular PCoA 3D function
-    pcoa_coords <- perform_pcoa(pcoa_dist_matrix(), k = 3)
-    groups <- extract_target_groups(meta_data_ML(), active_target_var())
-    
-    create_3d_pcoa(
-      pcoa_coords = pcoa_coords,
-      groups = groups,
-      surface = !ellipsoid_PCOA(),
-      ellipsoid = ellipsoid_PCOA(),
-      fit = surface_PCOA(),
-      surface_col = custom_palette
-    )
+  output$PCoA_3d <- renderChart({
+    req(input$ml_use_pcoa)
+    s <- perform_pcoa(pcoa_dist_matrix(), k = 3); g <- ml_groups(); id <- meta_data_ML()$id
+    chart_scatter3d(s$pcoa1, s$pcoa2, s$pcoa3, g, id,
+                    sample_tip(id, g, PCoA1 = s$pcoa1, PCoA2 = s$pcoa2, PCoA3 = s$pcoa3), labels = paste("PCoA axis", 1:3))
   })
   
   
   ########################## PLOT NMDS ############################################
-  output$NMDS_2d <- renderGirafe({
-    req(input$ml_use_nmds)  # Only render if selected
-    # Use modular NMDS function
-    nmds_coords <- perform_nmds(nmds_dist_matrix(), k = 2)
-    groups <- extract_target_groups(meta_data_ML(), active_target_var())
-    
-    data <- nmds_coords
-    data$target <- groups
-    data$sample_id <- meta_data_ML()$id
-    data$tooltip <- paste0(
-      "<b>Sample: ", data$sample_id, "</b><br/>",
-      "Group: ", data$target, "<br/>",
-      "NMDS1: ", round(data$NMDS1, 2), "<br/>",
-      "NMDS2: ", round(data$NMDS2, 2)
-    )
-    data$data_id <- data$sample_id
-    
-    p <- data %>% ggplot(aes(x= NMDS1, y= NMDS2, fill= target, color= target,
-                              tooltip = tooltip, data_id = data_id)) +
-      geom_point_interactive(size = 4, alpha = 0.8) +
-      stat_ellipse()+
-      theme_microarrai() +
-      scale_color_microarrai() +
-      scale_fill_microarrai()
-    
-    apply_girafe(p, width_svg = 10, height_svg = 7)
+  output$NMDS_2d <- renderChart({
+    req(input$ml_use_nmds)
+    s <- perform_nmds(nmds_dist_matrix(), k = 2); g <- ml_groups(); id <- meta_data_ML()$id
+    chart_scatter(s$NMDS1, s$NMDS2, g, id, sample_tip(id, g, NMDS1 = s$NMDS1, NMDS2 = s$NMDS2),
+                  xlab = "NMDS 1", ylab = "NMDS 2")
   })
-  
-  
-  ellipsoid_NMDS <- reactiveVal(FALSE)
-  surface_NMDS <- reactiveVal("smooth")
-  
-  observeEvent(input$toggle_ellipsoid_NMDS, {
-    ellipsoid_NMDS(!ellipsoid_NMDS())
-  })
-  
-  observeEvent(input$toggle_surface_NMDS, {
-    # Use modular toggle function
-    surface_NMDS(toggle_surface_fit(surface_NMDS()))
-  })
-  
 
-  output$NMDS_3d <- renderRglwidget({
-    req(input$ml_use_nmds)  # Only render if selected
-    # Use modular NMDS 3D function
-    nmds_coords <- perform_nmds(nmds_dist_matrix(), k = 3)
-    groups <- extract_target_groups(meta_data_ML(), active_target_var())
-    
-    create_3d_nmds(
-      nmds_coords = nmds_coords,
-      groups = groups,
-      surface = !ellipsoid_NMDS(),
-      ellipsoid = ellipsoid_NMDS(),
-      fit = surface_NMDS(),
-      surface_col = custom_palette
-    )
-  })
-  
-  output$current_params_NMDS <- renderText({
-    paste("Ellipsoid:", ellipsoid_NMDS(), "| Surface:", surface_NMDS())
+  output$NMDS_3d <- renderChart({
+    req(input$ml_use_nmds)
+    s <- perform_nmds(nmds_dist_matrix(), k = 3); g <- ml_groups(); id <- meta_data_ML()$id
+    chart_scatter3d(s$NMDS1, s$NMDS2, s$NMDS3, g, id,
+                    sample_tip(id, g, NMDS1 = s$NMDS1, NMDS2 = s$NMDS2, NMDS3 = s$NMDS3), labels = paste("NMDS", 1:3))
   })
   
   ########################## DBSCAN CLUSTERING ############################################
   
-  output$dbscan_plot <- renderGirafe({
+  # One DBSCAN run on the first two PCs, shared by the plot and the metrics
+  dbscan_fit <- reactive({
     req(input$ml_use_dbscan)
-    
-    # Use PCA coordinates for clustering (first 2 components)
-    pca_coords <- PCA_mod()[, 1:2]
-    groups <- extract_target_groups(meta_data_ML(), active_target_var())
+    eps <- if (!is.null(input$dbscan_eps)) input$dbscan_eps else 2.0
+    minpts <- if (!is.null(input$dbscan_minpts)) input$dbscan_minpts else 5
+    coords <- PCA_mod()[, 1:2]
+    list(coords = coords, eps = eps, minpts = minpts, result = dbscan::dbscan(coords, eps = eps, minPts = minpts))
+  })
+
+  output$dbscan_plot <- renderChart({
+    fit <- dbscan_fit()
+    pca_coords <- fit$coords
+    groups <- ml_groups()
     sample_ids <- meta_data_ML()$id
-    
-    # Perform DBSCAN clustering with user-defined parameters
-    eps_value <- if (!is.null(input$dbscan_eps)) input$dbscan_eps else 2.0
-    minpts_value <- if (!is.null(input$dbscan_minpts)) input$dbscan_minpts else 5
-    
-    db_result <- dbscan::dbscan(pca_coords, eps = eps_value, minPts = minpts_value)
+    eps_value <- fit$eps
+    minpts_value <- fit$minpts
+    db_result <- fit$result
     
     # Create plot data
     plot_data <- data.frame(
@@ -2889,77 +2495,18 @@ output$normalization_method_description <- renderUI({
     plot_data$Cluster_Label <- ifelse(plot_data$Cluster == "0", "Noise", 
                                        paste("Cluster", plot_data$Cluster))
     
-    plot_data$tooltip <- paste0(
-      "<b>Sample: ", plot_data$Sample_ID, "</b><br/>",
-      "True Group: ", plot_data$True_Group, "<br/>",
-      "DBSCAN Cluster: ", plot_data$Cluster_Label, "<br/>",
-      "PC1: ", round(plot_data$PC1, 2), "<br/>",
-      "PC2: ", round(plot_data$PC2, 2)
-    )
-    plot_data$data_id <- plot_data$Sample_ID
-    
-    # Create color palette for true groups (not clusters)
-    n_groups <- length(unique(groups))
-    group_colors <- custom_palette[1:n_groups]
-    names(group_colors) <- unique(groups)
-    
-    # Create shape mapping for clusters
-    n_clusters <- max(db_result$cluster)
-    cluster_shapes <- if(n_clusters > 0) {
-      c(16, 17, 15, 18, 3, 4, 8)[1:(n_clusters + 1)]  # +1 for noise
-    } else {
-      c(16)
-    }
-    
-    # Plot: Color by True Group, Shape by DBSCAN Cluster
-    p <- ggplot(plot_data, aes(x = PC1, y = PC2, 
-                                color = True_Group, 
-                                shape = Cluster_Label,
-                                tooltip = tooltip, 
-                                data_id = data_id)) +
-      geom_point_interactive(size = 4.5, alpha = 0.8) +
-      scale_color_manual(values = group_colors) +
-      scale_shape_manual(values = cluster_shapes) +
-      labs(
-        title = "DBSCAN Clustering Results",
-        subtitle = paste("eps =", round(eps_value, 2), "| minPts =", minpts_value, 
-                        "| Clusters found:", max(db_result$cluster), 
-                        "| Noise points:", sum(db_result$cluster == 0)),
-        x = "PC1",
-        y = "PC2",
-        color = "True Group",
-        shape = "DBSCAN Cluster"
-      ) +
-      theme_microarrai() +
-      theme(legend.position = "right")
-    
-    # Add density contours for each DBSCAN cluster (except noise)
-    if(n_clusters > 0) {
-      cluster_data <- plot_data %>% filter(Cluster != "0")
-      if(nrow(cluster_data) > 0) {
-        p <- p + stat_density_2d(
-          data = cluster_data,
-          aes(x = PC1, y = PC2, group = Cluster_Label),
-          color = "gray30",
-          linewidth = 0.4,
-          alpha = 0.5,
-          bins = 4
-        )
-      }
-    }
-    
-    apply_girafe(p, width_svg = 11, height_svg = 7)
+    chart_scatter(plot_data$PC1, plot_data$PC2, groups, sample_ids,
+                  paste0(sample_ids, "\nTrue group: ", groups, "\nDBSCAN: ", plot_data$Cluster_Label),
+                  xlab = "PC1", ylab = "PC2", ellipse = FALSE, shape = plot_data$Cluster_Label,
+                  group_title = "True group", shape_title = "DBSCAN cluster",
+                  subtitle = paste0("eps = ", round(eps_value, 2), " · minPts = ", minpts_value,
+                                    " · clusters: ", max(db_result$cluster), " · noise points: ", sum(db_result$cluster == 0)))
   })
   
   output$dbscan_metrics <- renderUI({
-    req(input$ml_use_dbscan)
-    
-    # Use PCA coordinates for clustering
-    pca_coords <- PCA_mod()[, 1:2]
-    groups <- extract_target_groups(meta_data_ML(), active_target_var())
-    
-    # Perform DBSCAN
-    db_result <- dbscan::dbscan(pca_coords, eps = 0.5, minPts = 3)
+    # Same run as the plot (it used fixed eps = 0.5, minPts = 3 and disagreed)
+    pca_coords <- dbscan_fit()$coords
+    db_result <- dbscan_fit()$result
     
     n_clusters <- max(db_result$cluster)
     n_noise <- sum(db_result$cluster == 0)
@@ -3016,7 +2563,7 @@ output$normalization_method_description <- renderUI({
   
   ########################## PLS-DA ANALYSIS ############################################
   
-  output$plsda_score_plot <- renderGirafe({
+  output$plsda_score_plot <- renderChart({
     req(input$ml_use_plsda)
     
     # Prepare data
@@ -3025,7 +2572,7 @@ output$normalization_method_description <- renderUI({
       dplyr::select(-id) %>%
       select_if(is.numeric)
     
-    Y <- extract_target_groups(meta_data_ML(), active_target_var())
+    Y <- ml_groups()
     sample_ids <- meta_data_ML()$id
     
     # Remove NA and ensure proper format
@@ -3036,36 +2583,11 @@ output$normalization_method_description <- renderUI({
     # Perform PLS-DA
     plsda_result <- mixOmics::plsda(X, Y, ncomp = 2)
     
-    # Extract scores
     scores <- as.data.frame(plsda_result$variates$X)
-    scores$Group <- Y
-    scores$Sample_ID <- sample_ids
-    scores$tooltip <- paste0(
-      "<b>Sample: ", scores$Sample_ID, "</b><br/>",
-      "Group: ", scores$Group, "<br/>",
-      "Comp1: ", round(scores$comp1, 2), "<br/>",
-      "Comp2: ", round(scores$comp2, 2)
-    )
-    scores$data_id <- scores$Sample_ID
-    
-    # Calculate variance explained
-    var_exp <- plsda_result$prop_expl_var$X
-    
-    p <- ggplot(scores, aes(x = comp1, y = comp2, color = Group, fill = Group,
-                             tooltip = tooltip, data_id = data_id)) +
-      geom_point_interactive(size = 4, alpha = 0.8) +
-      stat_ellipse(level = 0.95, alpha = 0.2) +
-      scale_color_microarrai() +
-      scale_fill_microarrai() +
-      labs(
-        title = "PLS-DA Score Plot",
-        x = paste0("Component 1 (", round(var_exp[1] * 100, 1), "%)"),
-        y = paste0("Component 2 (", round(var_exp[2] * 100, 1), "%)")
-      ) +
-      theme_microarrai() +
-      theme(legend.position = "right")
-    
-    apply_girafe(p, width_svg = 10, height_svg = 7)
+    var_exp <- round(100 * plsda_result$prop_expl_var$X, 1)
+    chart_scatter(scores$comp1, scores$comp2, Y, sample_ids,
+                  sample_tip(sample_ids, Y, Comp1 = scores$comp1, Comp2 = scores$comp2),
+                  xlab = sprintf("Component 1 (%s %%)", var_exp[1]), ylab = sprintf("Component 2 (%s %%)", var_exp[2]))
   })
   
   output$plsda_metrics <- renderUI({
@@ -3077,12 +2599,18 @@ output$normalization_method_description <- renderUI({
       dplyr::select(-id) %>%
       select_if(is.numeric)
     
-    Y <- extract_target_groups(meta_data_ML(), active_target_var())
+    Y <- ml_groups()
     
     # Remove NA
     X[is.na(X)] <- 0
     X <- as.matrix(X)
     Y <- as.factor(Y)
+    small <- names(which(table(Y) < 2))
+    if (length(small)) {
+      return(tags$div(class = "mai-chart-msg error", tags$span("!"), tags$p(
+        "Cross-validated PLS-DA needs at least 2 samples per group; these groups have one: ",
+        paste(small, collapse = ", "), ". If the target is a numeric variable, choose a categorical one.")))
+    }
     
     # Perform PLS-DA with cross-validation
     plsda_result <- mixOmics::plsda(X, Y, ncomp = 2)
@@ -3140,7 +2668,7 @@ output$normalization_method_description <- renderUI({
       dplyr::select(-id) %>%
       select_if(is.numeric)
     
-    Y <- extract_target_groups(meta_data_ML(), active_target_var())
+    Y <- ml_groups()
     
     # Remove NA
     X[is.na(X)] <- 0
@@ -3164,7 +2692,7 @@ output$normalization_method_description <- renderUI({
     # Plot
     ggplot(vip_df, aes(x = reorder(Variable, VIP), y = VIP)) +
       geom_bar(stat = "identity", fill = "#667eea", alpha = 0.8) +
-      geom_hline(yintercept = 1, linetype = "dashed", color = "red", size = 1) +
+      geom_hline(yintercept = 1, linetype = "dashed", color = "red", linewidth = 1) +
       coord_flip() +
       labs(
         title = "Top 15 Variables by VIP Score",
@@ -3178,21 +2706,103 @@ output$normalization_method_description <- renderUI({
   
   ####### Supervised machine learning ####
   
-  ML.db <- reactive({
-    req(meta_data_ML(), active_target_var())
-    
-    # Use modular ML data preparation function (clinical NAs imputed with the
-    # same method chosen for peptides, default kNN)
-    result <- prepare_ml_data(
-      data = meta_data_ML(),
-      group_var = active_target_var(),
-      id_column = "id",
-      impute_method = if (!is.null(input$imputation_method)) input$imputation_method else "knn"
-    )
-    
-    message("ML.db prepared with ", nrow(result), " samples and ", ncol(result), " features")
-    result
+  # Model input: peptides BEFORE imputation plus the target. Imputation,
+  # candidate selection and fitting happen in ml_prep() on training rows only
+  # (R/server/ml_validation.R), so no test sample leaks into the model.
+  ml_input <- reactive({
+    req(raw_pepdata(), active_database(), active_target_var())
+    target <- active_target_var()
+    d <- dplyr::inner_join(raw_pepdata(), active_database()[, c("id", target)], by = "id") %>%
+      dplyr::rename(target = !!rlang::sym(target)) %>%
+      dplyr::filter(!is.na(target)) %>%
+      as.data.frame() %>%
+      tibble::column_to_rownames("id")
+    d$target <- droplevels(factor(d$target))
+    levels(d$target) <- make.names(levels(d$target), unique = TRUE)  # caret needs syntactic class names
+    d[, c("target", setdiff(names(d), "target"))]
   })
+
+  # Candidate rule chosen in the Peptide Analysis funnel, re-applied on the
+  # training rows. Without a funnel selection every peptide is a candidate.
+  ml_criteria <- reactive({
+    if (length(selected_biomarkers()) == 0) return(list(method = "all"))
+    list(method = input$ml_selection_method, padj_max = input$results_pval_threshold,
+         auc_min = input$results_auc_threshold, top_n = input$ml_top_n,
+         auc_threshold = input$ml_auc_threshold)
+  })
+
+  ml_impute_method <- reactive(if (is.null(input$imputation_method)) "knn" else input$imputation_method)
+  ml_seed <- reactive(if (is.null(input$ml_seed) || is.na(input$ml_seed)) ML_DEFAULT_SEED else as.integer(input$ml_seed))
+  ml_mode <- reactive(if (is.null(input$ml_validation_mode)) "holdout" else input$ml_validation_mode)
+
+  # Split plus training-only imputation and selection, shared by every model so
+  # all of them are scored on the same test samples.
+  ml_prep <- eventReactive(input$ml_run_pipeline, {
+    # First thing the pipeline does, so the request heads the ML log lines
+    log_step("ML", "Pipeline requested", target = input$ml_target_var,
+             supervised = c("C5.0", "RF", "SVM", "XGBoost")[c(isTRUE(input$ml_use_c50), isTRUE(input$ml_use_rf), isTRUE(input$ml_use_svm), isTRUE(input$ml_use_xgboost))],
+             unsupervised = c("heatmap", "PCA", "PCoA", "NMDS", "DBSCAN", "PLS-DA")[c(isTRUE(input$ml_use_heatmap), isTRUE(input$ml_use_pca), isTRUE(input$ml_use_pcoa), isTRUE(input$ml_use_nmds), isTRUE(input$ml_use_dbscan), isTRUE(input$ml_use_plsda))],
+             validation = ml_mode(), seed = ml_seed(), candidates_from_peptide_tab = length(selected_biomarkers()))
+    d <- ml_input()
+    # A numeric clinical variable (e.g. a 3-10 score) makes one class per value,
+    # many with a single sample: every fold then lacks a class and all models fail.
+    counts <- table(d$target)
+    small <- names(counts)[counts < ML_CV_FOLDS]
+    if (length(small)) log_step("ML", "Training refused", level = "WARN", target = active_target_var(),
+                                groups = paste0(names(counts), "=", as.integer(counts)),
+                                why = sprintf("%d groups have fewer than %d samples", length(small), ML_CV_FOLDS),
+                                hint = "Choose a categorical target, or group a numeric one (e.g. low / high)")
+    validate(need(length(small) == 0, sprintf(paste(
+      "Classification needs at least %d samples in every group of '%s', and %d of its %d groups have fewer (%s).",
+      "If it is a numeric variable, choose a categorical one or group its values first."),
+      ML_CV_FOLDS, active_target_var(), length(small), length(counts), paste(utils::head(small, 6), collapse = ", "))))
+    if (ml_mode() == "nested") {
+      full <- impute_missing(d, method = ml_impute_method())
+      return(list(mode = "nested", data = d,
+                  train = full[, c("target", select_candidates(full, ml_criteria())), drop = FALSE]))
+    }
+    s <- split_holdout(d, seed = ml_seed())
+    p <- c(list(mode = "holdout", data = d),
+           prepare_partition(s$train, s$test, ml_impute_method(), ml_criteria()))
+    log_step("ML", "Hold-out split ready", seed = ml_seed(), train = nrow(p$train), test = nrow(p$test),
+             test_groups = paste0(names(table(p$test$target)), "=", as.integer(table(p$test$target))),
+             candidates = length(p$candidates), candidate_rule = ml_criteria()$method, imputation = ml_impute_method())
+    p
+  })
+
+  # Training rows behind the model-specific plots (C5.0 tree, SHAP, SVM 3D)
+  ml_train_data <- reactive(ml_prep()$train)
+
+  ml_fit <- function(model_type, label) {
+    p <- ml_prep()
+    opts <- list(use_rfe = isTRUE(input$ml_use_rfe), use_cv = !isFALSE(input$ml_use_cv),
+                 tune_params = isTRUE(input$ml_use_tuning))
+    log_step("ML", paste("START training", label), validation = p$mode, rfe = opts$use_rfe, cv = opts$use_cv,
+             tuning = opts$tune_params, predictors = ncol(p$train) - 1, training_samples = nrow(p$train))
+    t0 <- Sys.time()
+    res <- tryCatch(withProgress(message = paste0("Training ", label, "..."), value = 0.3, {
+      if (p$mode == "nested") {
+        do.call(run_nested_cv, c(list(p$data, model_type, ml_impute_method(), ml_criteria(), ml_seed()), opts))
+      } else {
+        do.call(fit_holdout, c(list(p, model_type), opts))
+      }
+    }), error = function(e) {
+      # Logged here, re-raised so the model's panel can still say why
+      if (!inherits(e, c("shiny.silent.error", "validation")))
+        log_step("ML", paste("FAILED training", label), level = "ERROR", why = conditionMessage(e),
+                 hint = "Check the class sizes in the log above; try without RFE or with nested CV for small cohorts")
+      stop(e)
+    })
+    if (isTRUE(res$skipped)) {
+      log_step("ML", paste(label, "skipped"), level = "WARN", why = res$skip_reason)
+    } else {
+      m <- res$metrics
+      log_step("ML", sprintf("DONE training %s in %.1f s", label, as.numeric(difftime(Sys.time(), t0, units = "secs"))),
+               test_auc = m$auc, auc_95ci = c(m$auc_low, m$auc_high), accuracy = m$accuracy, kappa = m$kappa,
+               rfe_used = res$rfe_used, features = length(res$selected_features))
+    }
+    res
+  }
 
   # Runs an ML training reactive and keeps the error instead of collapsing a
   # failure to a bare NULL, so panels can say WHY training failed instead of
@@ -3214,11 +2824,13 @@ output$normalization_method_description <- renderUI({
     # Only evaluate once an actual training attempt has been made (the user
     # clicked "Run ML Pipeline"), not as soon as a target variable is picked —
     # a disclaimer nobody asked for yet is just noise.
-    req(input$ml_run_pipeline, ML.db())
-    db <- ML.db()
+    # Assess what the models actually see: training rows and the candidates
+    # chosen on them, not every peptide in the matrix.
+    req(input$ml_run_pipeline)
+    tr <- ml_prep()$train
     ml_sample_size_check(
-      n = nrow(db), class_counts = table(db$target), n_features = ncol(db) - 1,
-      cv_folds = 3  # matches cv_folds passed to train_model_advanced() below
+      n = nrow(tr), class_counts = table(tr$target), n_features = ncol(tr) - 1,
+      cv_folds = ML_CV_FOLDS
     )
   })
 
@@ -3226,129 +2838,67 @@ output$normalization_method_description <- renderUI({
     check <- tryCatch(ml_size_check(), error = function(e) NULL)
     ml_disclaimer_banner(check)
   })
-  
-  # ===== ADVANCED TRAINING REACTIVES (OPTIONAL) =====
-  
-  # C5.0 Advanced Training (only runs when pipeline button is clicked)
-  c50_advanced_result <- eventReactive(input$ml_run_pipeline, {
-    req(input$ml_use_c50, ML.db())
-    
-    # Valores por defecto si no existen los inputs
-    use_rfe <- if(!is.null(input$ml_use_rfe)) input$ml_use_rfe else FALSE
-    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else TRUE
-    tune_params <- if(!is.null(input$ml_use_tuning)) input$ml_use_tuning else FALSE
-    
-    message("Starting C5.0 training: RFE=", use_rfe, " CV=", use_cv, " Tuning=", tune_params)
-    
-    withProgress(message = 'Training C5.0...', value = 0, {
-      incProgress(0.3, detail = "Preparing data...")
-      
-      result <- train_model_advanced(
-        data = ML.db(),
-        model_type = "c50",
-        use_rfe = use_rfe,
-        use_cv = use_cv,
-        cv_folds = 3,  # Reduced to 3 for faster testing
-        cv_repeats = 1,  # Reduced to 1 for faster testing
-        tune_params = tune_params
-      )
-      
-      message("C5.0 training complete. Accuracy: ", round(result$metrics$accuracy, 3))
-      incProgress(1, detail = "Complete!")
-      result
-    })
+
+  # Which validation scheme suits this sample size, shown next to the selector
+  output$ml_validation_hint <- renderUI({
+    d <- tryCatch(ml_input(), error = function(e) NULL)
+    if (is.null(d)) return(NULL)
+    n_feat <- if (length(selected_biomarkers()) > 0) length(selected_biomarkers()) else ncol(d) - 1
+    rec <- recommend_validation(table(d$target), n_feat)
+    tags$small(icon("lightbulb", style = "margin-right: 4px;"), rec$reason,
+               style = "color: #0066cc; font-size: 11px; display: block; margin-top: 6px;")
   })
-  
-  # Random Forest Advanced Training (only runs when pipeline button is clicked)
-  rf_advanced_result <- eventReactive(input$ml_run_pipeline, {
-    req(input$ml_use_rf, ML.db())
-    
-    # Valores por defecto si no existen los inputs
-    use_rfe <- if(!is.null(input$ml_use_rfe)) input$ml_use_rfe else FALSE
-    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else TRUE
-    tune_params <- if(!is.null(input$ml_use_tuning)) input$ml_use_tuning else FALSE
-    
-    message("Starting RF training: RFE=", use_rfe, " CV=", use_cv, " Tuning=", tune_params)
-    
-    withProgress(message = 'Training Random Forest...', value = 0, {
-      incProgress(0.3, detail = "Preparing data...")
-      
-      result <- train_model_advanced(
-        data = ML.db(),
-        model_type = "rf",
-        use_rfe = use_rfe,
-        use_cv = use_cv,
-        cv_folds = 3,  # Reduced to 3 for faster testing
-        cv_repeats = 1,  # Reduced to 1 for faster testing
-        tune_params = tune_params
-      )
-      
-      message("RF training complete. Accuracy: ", round(result$metrics$accuracy, 3))
-      incProgress(1, detail = "Complete!")
-      result
+
+  # ===== TRAINING REACTIVES =====
+  c50_advanced_result     <- eventReactive(input$ml_run_pipeline, { req(input$ml_use_c50);     ml_fit("c50", "C5.0") })
+  rf_advanced_result      <- eventReactive(input$ml_run_pipeline, { req(input$ml_use_rf);      ml_fit("rf", "Random Forest") })
+  svm_advanced_result     <- eventReactive(input$ml_run_pipeline, { req(input$ml_use_svm);     ml_fit("svm", "SVM") })
+  xgboost_advanced_result <- eventReactive(input$ml_run_pipeline, { req(input$ml_use_xgboost); ml_fit("xgboost", "XGBoost") })
+
+  # Independent-test metrics for every trained model, CV shown as reference
+  output$ml_validation_summary <- renderUI({
+    p <- tryCatch(ml_prep(), error = function(e) NULL)
+    req(p)
+    runs <- list("C5.0" = c50_advanced_result, "Random Forest" = rf_advanced_result,
+                 "SVM" = svm_advanced_result, "XGBoost" = xgboost_advanced_result)
+    used <- c(isTRUE(input$ml_use_c50), isTRUE(input$ml_use_rf),
+              isTRUE(input$ml_use_svm), isTRUE(input$ml_use_xgboost))
+    fmt <- function(x) if (is.null(x) || is.na(x)) "\u2014" else sprintf("%.2f", x)
+
+    rows <- lapply(names(runs)[used], function(nm) {
+      r <- capture_ml_result(runs[[nm]])$result
+      if (is.null(r) || isTRUE(r$skipped) || is.null(r$validation)) return(NULL)
+      m <- r$metrics
+      ci <- if (is.na(m$auc_low)) "" else sprintf(" [%.2f\u2013%.2f]", m$auc_low, m$auc_high)
+      tags$tr(tags$td(tags$strong(nm)), tags$td(paste0(fmt(m$auc), ci)), tags$td(fmt(m$accuracy)),
+              tags$td(fmt(m$kappa)), tags$td(fmt(m$sensitivity)), tags$td(fmt(m$specificity)),
+              tags$td(fmt(r$cv_metrics$auc), style = "color: #999;"))
     })
+
+    header <- if (p$mode == "nested") {
+      sprintf("Nested cross-validation: %d outer folds, every one of the %d samples predicted by a model that never saw it.",
+              ML_OUTER_FOLDS, nrow(p$data))
+    } else {
+      sprintf("Independent test set: %d samples (%d%%, stratified, seed %d), never used for imputation, peptide selection, RFE or tuning. Training: %d samples, %d candidate peptides.",
+              nrow(p$test), round(100 * ML_TEST_PROP), ml_seed(), nrow(p$train), length(p$candidates))
+    }
+
+    card_container(
+      style = "margin: 0 15px; padding: 25px;",
+      tags$p(icon("shield-alt", style = "color: #17a589; margin-right: 8px;"), header,
+             style = "color: #191c32; font-size: 14px;"),
+      tags$table(
+        class = "table table-sm", style = "color: #191c32; text-align: center;",
+        tags$thead(tags$tr(lapply(c("Model", "AUC [95% CI]", "Accuracy", "Kappa", "Sensitivity",
+                                    "Specificity", "CV AUC (reference)"), tags$th))),
+        tags$tbody(rows)
+      ),
+      tags$small(if (p$mode == "nested") "Metrics pooled over the outer folds. CV AUC is the inner cross-validation of the final model, shown for reference only."
+                 else "Metrics on the test set. CV AUC is the cross-validation inside the training set, shown for reference only.",
+                 style = "color: #666;")
+    )
   })
-  
-  # SVM Advanced Training (only runs when pipeline button is clicked)
-  svm_advanced_result <- eventReactive(input$ml_run_pipeline, {
-    req(input$ml_use_svm, ML.db())
-    
-    # Valores por defecto si no existen los inputs
-    use_rfe <- if(!is.null(input$ml_use_rfe)) input$ml_use_rfe else FALSE
-    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else TRUE
-    tune_params <- if(!is.null(input$ml_use_tuning)) input$ml_use_tuning else FALSE
-    
-    message("Starting SVM training: RFE=", use_rfe, " CV=", use_cv, " Tuning=", tune_params)
-    
-    withProgress(message = 'Training SVM...', value = 0, {
-      incProgress(0.3, detail = "Preparing data...")
-      
-      result <- train_model_advanced(
-        data = ML.db(),
-        model_type = "svm",
-        use_rfe = use_rfe,
-        use_cv = use_cv,
-        cv_folds = 3,  # Reduced to 3 for faster testing
-        cv_repeats = 1,  # Reduced to 1 for faster testing
-        tune_params = tune_params
-      )
-      
-      message("SVM training complete. Accuracy: ", round(result$metrics$accuracy, 3))
-      incProgress(1, detail = "Complete!")
-      result
-    })
-  })
-  
-  # XGBoost Advanced Training (only runs when pipeline button is clicked)
-  xgboost_advanced_result <- eventReactive(input$ml_run_pipeline, {
-    req(input$ml_use_xgboost, ML.db())
-    
-    # Valores por defecto si no existen los inputs
-    use_rfe <- if(!is.null(input$ml_use_rfe)) input$ml_use_rfe else FALSE
-    use_cv <- if(!is.null(input$ml_use_cv)) input$ml_use_cv else TRUE
-    tune_params <- if(!is.null(input$ml_use_tuning)) input$ml_use_tuning else FALSE
-    
-    message("Starting XGBoost training: RFE=", use_rfe, " CV=", use_cv, " Tuning=", tune_params)
-    
-    withProgress(message = 'Training XGBoost...', value = 0, {
-      incProgress(0.3, detail = "Preparing data...")
-      
-      result <- train_model_advanced(
-        data = ML.db(),
-        model_type = "xgboost",
-        use_rfe = use_rfe,
-        use_cv = use_cv,
-        cv_folds = 3,  # Reduced to 3 for faster testing
-        cv_repeats = 1,  # Reduced to 1 for faster testing
-        tune_params = tune_params
-      )
-      
-      message("XGBoost training complete. Accuracy: ", round(result$metrics$accuracy, 3))
-      incProgress(1, detail = "Complete!")
-      result
-    })
-  })
-  
+
   # ===== DYNAMIC PANEL OUTPUTS =====
   
   # C5.0 Panel
@@ -3410,7 +2960,7 @@ output$normalization_method_description <- renderUI({
               icon("cog", style = "color: #667eea; margin-right: 8px;"),
               if(!is.null(result)) {
                 n_features <- if(!is.null(result$varimp)) nrow(result$varimp$importance) else 0
-                cv_info <- if(use_cv) "3-Fold CV" else "No CV"
+                cv_info <- if (!is.null(result$validation_label)) result$validation_label else "No CV"
                 paste0("C5.0 + ", cv_info, " | ", n_features, " features")
               } else if (!is.null(outcome$error)) {
                 paste0("Training failed: ", outcome$error)
@@ -3420,10 +2970,10 @@ output$normalization_method_description <- renderUI({
             )
           ),
           # Performance metrics - Radar plot
-          if(use_cv && !is.null(result)) {
+          if(!is.null(result)) {
             tags$div(
               style = "background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 0;",
-              girafeOutput("c50_radar", height = "280px")
+              chartOutput("c50_radar", height = "300px")
             )
           }
         )
@@ -3490,7 +3040,7 @@ output$normalization_method_description <- renderUI({
               icon("cog", style = "color: #34a853; margin-right: 8px;"),
               if(!is.null(result)) {
                 n_features <- if(!is.null(result$varimp)) nrow(result$varimp$importance) else 0
-                cv_info <- if(use_cv) "3-Fold CV" else "No CV"
+                cv_info <- if (!is.null(result$validation_label)) result$validation_label else "No CV"
                 paste0("RF + ", cv_info, " | ", n_features, " features")
               } else if (!is.null(outcome$error)) {
                 paste0("Training failed: ", outcome$error)
@@ -3500,10 +3050,10 @@ output$normalization_method_description <- renderUI({
             )
           ),
           # Performance metrics - Radar plot
-          if(use_cv && !is.null(result)) {
+          if(!is.null(result)) {
             tags$div(
               style = "background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 0;",
-              girafeOutput("rf_radar", height = "280px")
+              chartOutput("rf_radar", height = "300px")
             )
           }
         )
@@ -3565,7 +3115,7 @@ output$normalization_method_description <- renderUI({
                 "SVM not run (see note above)"
               } else if(!is.null(result)) {
                 n_features <- if(!is.null(result$selected_features)) length(result$selected_features) else 0
-                cv_info <- if(use_cv) "3-Fold CV" else "No CV"
+                cv_info <- if (!is.null(result$validation_label)) result$validation_label else "No CV"
                 rfe_info <- if(use_rfe) " + RFE" else ""
                 paste0("SVM + ", cv_info, rfe_info, " | ", n_features, " features")
               } else if (!is.null(outcome$error)) {
@@ -3576,10 +3126,10 @@ output$normalization_method_description <- renderUI({
             )
           ),
           # Performance metrics - Radar plot
-          if(use_cv && !is.null(result) && !isTRUE(result$skipped)) {
+          if(!is.null(result) && !isTRUE(result$skipped)) {
             tags$div(
               style = "background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 0;",
-              girafeOutput("svm_radar", height = "280px")
+              chartOutput("svm_radar", height = "300px")
             )
           }
         )
@@ -3656,7 +3206,7 @@ output$normalization_method_description <- renderUI({
               icon("cog", style = "color: #f39c12; margin-right: 8px;"),
               if(!is.null(result)) {
                 n_features <- if(!is.null(result$varimp)) nrow(result$varimp$importance) else 0
-                cv_info <- if(use_cv) "3-Fold CV" else "No CV"
+                cv_info <- if (!is.null(result$validation_label)) result$validation_label else "No CV"
                 paste0("XGBoost + ", cv_info, " | ", n_features, " features")
               } else if (!is.null(outcome$error)) {
                 paste0("Training failed: ", outcome$error)
@@ -3666,10 +3216,10 @@ output$normalization_method_description <- renderUI({
             )
           ),
           # Performance metrics - Radar plot
-          if(use_cv && !is.null(result)) {
+          if(!is.null(result)) {
             tags$div(
               style = "background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 0;",
-              girafeOutput("xgb_radar", height = "280px")
+              chartOutput("xgb_radar", height = "300px")
             )
           }
         )
@@ -3753,12 +3303,12 @@ output$normalization_method_description <- renderUI({
   output$c5.tree <- renderPlot({
     req(input$ml_use_c50)  # Only render if selected
     # Use modular C5.0 function
-    model <- train_c50_model(ML.db(), trials = 50, seed = 1234)
+    model <- train_c50_model(ml_train_data(), trials = 50, seed = 1234)
     plot(model)
   })
   
   # C5.0 Radar Plot for Performance Metrics
-  output$c50_radar <- renderGirafe({
+  output$c50_radar <- renderChart({
     req(input$ml_use_c50)
     result <- tryCatch(c50_advanced_result(), error = function(e) NULL)
     
@@ -3769,7 +3319,6 @@ output$normalization_method_description <- renderUI({
     create_performance_radar(result, model_color = "#667eea")
   })
   
-  # C5.0 decision boundary removed - not compatible with ggiraph interactivity
   
   ## Random Forest ##
   
@@ -3845,7 +3394,7 @@ output$normalization_method_description <- renderUI({
   })
   
   # RF Radar Plot for Performance Metrics
-  output$rf_radar <- renderGirafe({
+  output$rf_radar <- renderChart({
     req(input$ml_use_rf)
     result <- tryCatch(rf_advanced_result(), error = function(e) NULL)
     
@@ -3927,7 +3476,7 @@ output$normalization_method_description <- renderUI({
   })
   
   # SVM Radar Plot for Performance Metrics
-  output$svm_radar <- renderGirafe({
+  output$svm_radar <- renderChart({
     req(input$ml_use_svm)
     result <- tryCatch(svm_advanced_result(), error = function(e) NULL)
 
@@ -3963,7 +3512,7 @@ output$normalization_method_description <- renderUI({
   output$xgb_importance_plot <- renderPlot({
     withProgress(message = 'Creando gráfico 3D', value = 0, {
       # Use modular scaling function
-      df.scaled <- scale_ml_data(ML.db())
+      df.scaled <- scale_ml_data(ml_train_data())
       
       # Obtener las variables importantes de la expresión reactiva
       variables_importantes <- variables_importantes_reactive()
@@ -4064,7 +3613,7 @@ output$normalization_method_description <- renderUI({
   xgb.shap <- reactive({
     req(input$ml_use_xgboost)  # Only compute if selected
     # Use modular XGBoost and SHAP functions
-    xgb_result <- train_xgboost_model(ML.db(), max_depth = 3, eta = 0.1, nrounds = 100)
+    xgb_result <- train_xgboost_model(ml_train_data(), max_depth = 3, eta = 0.1, nrounds = 100)
     calculate_shap_values(xgb_result)
   })
   
@@ -4114,7 +3663,7 @@ output$normalization_method_description <- renderUI({
   })
   
   # XGBoost Radar Plot for Performance Metrics
-  output$xgb_radar <- renderGirafe({
+  output$xgb_radar <- renderChart({
     req(input$ml_use_xgboost)
     result <- tryCatch(xgboost_advanced_result(), error = function(e) NULL)
     
@@ -4350,8 +3899,11 @@ output$normalization_method_description <- renderUI({
     }
     
     # Update selected_biomarkers with consensus features only
-    selected_biomarkers(consensus_features)
-    message("[ML_EXPORT] ✓ SUCCESS: Sent ", length(consensus_features), " consensus biomarkers")
+    # Kept apart from selected_biomarkers(): that one is the ML input, and
+    # overwriting it made the next training run use the consensus alone.
+    consensus_biomarkers(consensus_features)
+    log_step("ML", "Consensus biomarkers sent to the protein view", n = length(consensus_features),
+             peptides = consensus_features, models = names(model_vars))
     message("[ML_EXPORT] Full list: ", paste(consensus_features, collapse = ", "))
     message("========== [ML_EXPORT] Complete ==========")
     
@@ -4378,21 +3930,19 @@ output$normalization_method_description <- renderUI({
   shinyjs::hide("ml_rf_results")
   shinyjs::hide("ml_svm_results")
   shinyjs::hide("ml_xgboost_results")
+  shinyjs::hide("ml_validation_results")
   shinyjs::hide("ml_venn_results")
   shinyjs::hide("ml_send_biomarkers_section")
   
   # Unified target variable (new system uses ml_target_var, old uses PCA_target/h_target)
+  # First chosen target that still exists in the clinical table. A selector can
+  # keep a column from a previous upload (e.g. "P_clara"), which used to crash
+  # every plot that looked it up.
   active_target_var <- reactive({
-    if (!is.null(input$ml_target_var)) {
-      return(input$ml_target_var)
-    } else if (!is.null(input$PCA_target)) {
-      return(input$PCA_target)
-    } else if (!is.null(input$h_target)) {
-      return(input$h_target[1])  # Take first if multiple
-    }
-    # Inherit rather than give up: returning NULL here left the protein tab with
-    # its hardcoded "group" default whenever the ML/PCA tabs had not been opened.
-    global_target_var()
+    cand <- c(input$ml_target_var, input$PCA_target, input$h_target[1], global_target_var())
+    db <- tryCatch(active_database(), error = function(e) NULL)
+    hit <- if (is.null(db)) cand else cand[cand %in% names(db)]
+    if (length(hit)) hit[1] else NULL
   })
   
   # ML Target Variable Selector
@@ -4434,6 +3984,7 @@ output$normalization_method_description <- renderUI({
                       input$ml_use_svm || input$ml_use_xgboost
     
     if (!any_unsupervised && !any_supervised) {
+      log_step("ML", "Run refused", level = "WARN", why = "no method ticked")
       showNotification(
         "Please select at least one ML method to run.",
         type = "warning",
@@ -4514,6 +4065,9 @@ output$normalization_method_description <- renderUI({
       # Step 3: Configure supervised methods
       incProgress(0.4, detail = "Configuring supervised methods...")
       
+      shinyjs::toggle("ml_validation_results",
+                      condition = any(c(input$ml_use_c50, input$ml_use_rf, input$ml_use_svm, input$ml_use_xgboost)))
+
       if (input$ml_use_c50) {
         shinyjs::show("ml_c50_results")
       } else {
@@ -4611,12 +4165,13 @@ output$normalization_method_description <- renderUI({
     session = session,
     clinical_data = reactive({ active_database() }),
     peptide_data = reactive({ full_pepdata() }),  # ← MATRIZ COMPLETA, no filtrada
-    biomarkers = reactive({ selected_biomarkers() }),
+    biomarkers = reactive({ if (length(consensus_biomarkers())) consensus_biomarkers() else selected_biomarkers() }),
     # Pass the reactive itself. With target = active_target_var() the promise was
     # forced once inside the module and frozen at that first value (usually NULL,
     # which fell through to the hardcoded "group"), so the protein tab never
     # followed the selected target.
-    target = active_target_var
+    target = active_target_var,
+    example_annotation = example_annotation
   )
   
   #### End Protein Visualization ####
@@ -4624,12 +4179,13 @@ output$normalization_method_description <- renderUI({
   #### Quality Control ####
 
   # The positive-control dilution series is what tells us the assay responded.
-  # Concentrations are read off the analyte name (e.g. "aIgE_0125" -> 0.125).
+  # Concentrations are read off the analyte name (e.g. "aIgE_0125", "aIgG_025");
+  # only their order matters, the metric is a rank correlation.
   qc_positive_controls <- reactive({
     spots <- qc_spot_data()
     if (is.null(spots)) return(NULL)
 
-    series <- unique(spots$ID[grepl("^a\\.?IgE", spots$ID, ignore.case = TRUE)])
+    series <- unique(spots$ID[grepl("^a\\.?Ig", spots$ID, ignore.case = TRUE)])
     if (length(series) < 3) return(NULL)
 
     digits <- sub("^[^0-9]*", "", series)
@@ -4637,7 +4193,7 @@ output$normalization_method_description <- renderUI({
       dplyr::filter(is.finite(dose))
   })
 
-  setup_quality_server(
+  qc_results <- setup_quality_server(
     input, output, session,
     qc_spots = reactive({ qc_spot_data() }),
     norm_diagnostics = reactive({ norm_diagnostics() }),
@@ -4646,6 +4202,40 @@ output$normalization_method_description <- renderUI({
   )
 
   #### End Quality Control ####
+
+  #### Report and results downloads ####
+
+  # Every trained model's result (NULL when not run or failed)
+  ml_runs <- reactive({
+    runs <- list("C5.0" = c50_advanced_result, "Random Forest" = rf_advanced_result,
+                 "SVM" = svm_advanced_result, "XGBoost" = xgboost_advanced_result)
+    used <- c(isTRUE(input$ml_use_c50), isTRUE(input$ml_use_rf), isTRUE(input$ml_use_svm), isTRUE(input$ml_use_xgboost))
+    lapply(runs[used], function(f) capture_ml_result(f)$result)
+  })
+
+  # Consensus table: peptides in the top N of at least two models
+  ml_consensus <- reactive({
+    top_n <- if (is.null(input$consensus_top_n)) 20 else input$consensus_top_n
+    get <- function(use, f) if (isTRUE(use)) utils::head(tryCatch(as.character(f()), error = function(e) character(0)), top_n)
+    vars <- Filter(length, list("C5.0" = get(input$ml_use_c50, variables_c5), "Random Forest" = get(input$ml_use_rf, variables_rf),
+                                "SVM" = get(input$ml_use_svm, variables_importantes_reactive), "XGBoost" = get(input$ml_use_xgboost, variables_xgb)))
+    req(length(vars) >= 2)
+    feats <- unique(unlist(vars))
+    hit <- matrix(vapply(vars, function(v) feats %in% v, logical(length(feats))), nrow = length(feats))
+    rank <- matrix(vapply(vars, function(v) match(feats, v), integer(length(feats))), nrow = length(feats))
+    out <- data.frame(peptide = feats, models = rowSums(hit),
+                      which_models = apply(hit, 1, function(h) paste(names(vars)[h], collapse = ", ")),
+                      mean_rank = round(rowMeans(rank, na.rm = TRUE), 1))
+    out <- out[out$models >= 2, ]
+    out[order(-out$models, out$mean_rank), ]
+  })
+
+  setup_report_server(input, output, session, src = list(
+    active_database = active_database, processed_data = processed_data, raw_pepdata = raw_pepdata,
+    available_analytes = available_analytes, path1 = path1, channel_labels = channel_labels,
+    selected_channels = selected_channels, qc_results = qc_results, norm_diagnostics = norm_diagnostics,
+    tests = tests, reg_models = reg_models, volcano_data = volcano_data, ml_runs = ml_runs, ml_prep = ml_prep,
+    ml_consensus = ml_consensus, consensus_biomarkers = consensus_biomarkers, example_annotation = example_annotation))
   
   ########################### DOCUMENTATION ###################################
   # The user guide is now fully static HTML in R/ui/ui_documentation.R — no

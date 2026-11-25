@@ -41,11 +41,25 @@ setup_quality_server <- function(input, output, session,
   metrics <- reactive({
     spots <- qc_spots()
     req(spots)
-    compute_array_quality(spots, positive_controls = positive_controls())
+    m <- run_step("QC", "grading every array on six metrics", compute_array_quality(spots, positive_controls = positive_controls()),
+                  positive_control_spots = if (!is.null(positive_controls())) positive_controls()$ID,
+                  hint = "QC needs raw scanner files; with a processed matrix it is not available.")
+    req(m)
+    m
   })
 
   graded <- reactive(grade_array_quality(metrics()))
-  verdicts <- reactive(summarise_array_quality(graded()))
+  verdicts <- reactive({
+    v <- summarise_array_quality(graded())
+    g <- graded()
+    failing <- v$verdict == "red"
+    reasons <- vapply(seq_len(nrow(v))[failing], function(i)
+      paste(g$label[g$sample == v$sample[i] & g$channel == v$channel[i] & g$grade %in% "red"], collapse = " + "), "")
+    log_step("QC", "Quality verdicts", pairs = nrow(v), pass = sum(v$verdict == "green"),
+             borderline = sum(v$verdict == "amber"), fail = sum(failing),
+             failing = if (any(failing)) paste0(v$sample[failing], "/ch", v$channel[failing], ": ", reasons))
+    v
+  })
 
   # Guards every downstream reactive: without a channel the filters compare
   # against a zero-length value and dplyr aborts.
@@ -207,33 +221,15 @@ setup_quality_server <- function(input, output, session,
 
   # Arrays run along the x axis: there are many of them and only six metrics,
   # so the grid stays landscape and readable at any cohort size.
-  output$qc_heatmap <- ggiraph::renderGirafe({
+  output$qc_heatmap <- renderChart({
     datos <- heatmap_data()
     req(nrow(datos) > 0)
-
-    n_arrays <- dplyr::n_distinct(datos$sample)
-
-    p <- ggplot2::ggplot(datos, ggplot2::aes(x = sample, y = label)) +
-      ggiraph::geom_tile_interactive(
-        ggplot2::aes(fill = grade, tooltip = tooltip, data_id = sample),
-        colour = "white", linewidth = 0.4
-      ) +
-      ggplot2::scale_fill_manual(values = QC_COLOURS, na.value = "#dfe4e6",
-                                 na.translate = TRUE, name = NULL) +
-      ggplot2::labs(x = NULL, y = NULL) +
-      ggplot2::theme_minimal(base_size = 11) +
-      ggplot2::theme(
-        axis.text.x = if (n_arrays <= 45) {
-          ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5, size = 7)
-        } else ggplot2::element_blank(),
-        axis.text.y = ggplot2::element_text(face = "bold", size = 10),
-        panel.grid = ggplot2::element_blank(),
-        legend.position = "none"
-      )
-
-    ggiraph::girafe(ggobj = p, width_svg = 13,
-                    height_svg = if (n_arrays <= 45) 4.4 else 3.2,
-                    options = list(ggiraph::opts_hover(css = "stroke:#191c32;stroke-width:1.5px;")))
+    list(type = "heatmap", rows = rev(levels(datos$label)), cols = levels(droplevels(datos$sample)),
+         cells = data.frame(r = as.character(datos$label), c = as.character(datos$sample),
+                            grade = datos$grade, tip = datos$tooltip),
+         colors = as.list(c(QC_COLOURS, na = "#dfe4e6")), colLabels = TRUE,
+         legend = c("green", "amber", "red", "na"),
+         legendLabels = list(green = "Pass", amber = "Borderline", red = "Fail", na = "Not measurable"))
   })
 
   # ---- Cohort plots -------------------------------------------------------
@@ -375,4 +371,7 @@ setup_quality_server <- function(input, output, session,
       )
     }
   )
+
+  # Handed back to app.R for the PDF report and the results workbook
+  list(metrics = metrics, graded = graded, verdicts = verdicts)
 }

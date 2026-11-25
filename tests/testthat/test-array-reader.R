@@ -82,6 +82,19 @@ test_that("ScanArray CSV keeps its own flag rule (below the threshold)", {
   expect_equal(read_microarray_file(f)$ID, c("pepA", "pepB"))
 })
 
+test_that("rows ending in a separator do not shift the columns or need unique IDs", {
+  f <- withr::local_tempfile(fileext = ".csv")
+  write_log(f, crlf(
+    "ScanArray Express export", "",
+    "ID,Ch1 Median,Ch1 B Median,Flags",
+    "pepA,1000,100,0,", "pepA,800,100,0,", "pepB,400,100,0,", "END DATA,"))
+
+  tab <- read_array_table(f)
+  expect_equal(names(tab), c("ID", "Ch1 Median", "Ch1 B Median", "Flags"))
+  expect_equal(tab$ID, c("pepA", "pepA", "pepB"))
+  expect_equal(read_microarray_file(f)$Expression, log2(c(10, 8, 4)))
+})
+
 test_that("quality columns are found whatever the scanner names them", {
   f <- withr::local_tempfile(fileext = ".gpr")
   mapix_gpr(f)
@@ -165,4 +178,25 @@ test_that("real .gpr files (if provided) are all readable", {
     expect_gt(nrow(spots), 0, label = basename(f))
     expect_false(anyNA(spots$ID), label = basename(f))
   }
+})
+
+test_that("default channel labels follow the laser colour, then the red/green order", {
+  source(file.path(repo, "R", "utils", "colors.R"), encoding = "UTF-8")
+  expect_equal(default_channel_labels(c("532", "635")), c("IgE", "IgG4"))
+  expect_equal(default_channel_labels(c("3", "4", "543", "633")), c("Ch3", "Ch4", "IgE", "IgG4"))  # ScanArray .gpr
+  expect_equal(default_channel_labels("532"), "IgE")                                           # single channel
+  expect_equal(default_channel_labels(c("1", "2")), c("IgG4", "IgE"))                          # ScanArray CSV
+})
+
+test_that("with_quality keeps flagged spots as NA so QC can count them as missing", {
+  f <- withr::local_tempfile(fileext = ".csv")
+  write_log(f, crlf(
+    "ScanArray Express export", "",
+    "ID,Ch1 Median,Ch1 B Median,Flags",
+    "pepA,1000,100,0", "pepB,1000,100,3", "pepC,1000,100,5"))
+
+  spots <- read_microarray_file(f, with_quality = TRUE)
+  expect_equal(spots$ID, c("pepA", "pepB", "pepC"))
+  expect_equal(is.na(spots$Expression), c(FALSE, FALSE, TRUE))
+  expect_equal(read_microarray_file(f)$ID, c("pepA", "pepB"))   # analysis still drops it
 })

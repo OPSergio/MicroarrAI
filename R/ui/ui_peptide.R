@@ -159,7 +159,7 @@ ui_peptide <- function() {
         column(
           4,
           tags$h4("Positive Peptides by Isotype", class = "mi-panel-title"),
-          girafeOutput("isotype_donut", height = "300px"),
+          chartOutput("isotype_donut", height = "300px"),
           tags$br(),
           tags$h4("Isotype Summary Statistics", class = "mi-panel-title"),
           DT::dataTableOutput("isotype_table")
@@ -167,7 +167,7 @@ ui_peptide <- function() {
         column(
           8,
           tags$h4("Expression Distribution by Isotype", class = "mi-panel-title"),
-          girafeOutput("expression_dist_plot", height = "300px", width = "100%"),
+          chartOutput("expression_dist_plot", height = "320px"),
           tags$br(),
           tags$h4("Top Samples by Positive Peptides", class = "mi-panel-title"),
           DT::dataTableOutput("top_samples_table", height = "300px", width = "100%")
@@ -261,12 +261,7 @@ ui_peptide <- function() {
             3,
             h4("Filter Options", style = "color: #191c32; margin-bottom: 15px; font-weight: bold;"),
             
-            checkboxGroupInput(
-              "volcano_isotypes", 
-              dark_label("Select Isotypes:"),
-              choices = c("IgE", "IgG4"),
-              selected = c("IgE", "IgG4")
-            ),
+            uiOutput("volcano_isotypes_ui"),  # isotypes found in the data
             
             checkboxInput(
               "volcano_facet_isotype", 
@@ -343,12 +338,12 @@ ui_peptide <- function() {
             6,
             tags$div(
               uiOutput("stats_var_plot"),
-              withSpinner(girafeOutput("stats_plot", height = "350px"))
+              withSpinner(chartOutput("stats_plot", height = "350px"))
             ),
             tags$hr(style = "margin: 20px 0;"),
             tags$div(
               tags$h4("ROC Curve", class = "mi-panel-title"),
-              withSpinner(plotOutput("rocs_plot", height = "350px"))
+              withSpinner(chartOutput("rocs_plot", height = "420px"))
             )
           )
         )
@@ -450,7 +445,7 @@ ui_peptide <- function() {
           column(
             6,
             tags$h4("Selection Process Overview", class = "mi-panel-title"),
-            girafeOutput("results_donut", height = "350px")
+            chartOutput("results_donut", height = "350px")
           ),
           column(
             6,

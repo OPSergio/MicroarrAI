@@ -18,6 +18,16 @@ function metisNav(tab, el) {
   setTimeout(function () { window.scrollTo({ top: 0, behavior: 'auto' }); }, 80);
 }
 
+// Keep the navbar pill in step when the server switches tabs (e.g. "Finish
+// Preprocess" or "Send to ML"), not only when the user clicks it
+$(document).on('shown.bs.tab', function (e) {
+  var tab = $(e.target).attr('data-value');
+  if (!tab || !document.querySelector('.metis-link[data-tab="' + tab + '"]')) return;
+  document.querySelectorAll('.metis-link').forEach(function (l) {
+    l.classList.toggle('active', l.getAttribute('data-tab') === tab);
+  });
+});
+
 /**
  * Light/dark switcher. Themes the app navbar (body.metis-light) and forwards
  * the choice to the landing iframe via postMessage.
@@ -28,6 +38,13 @@ function metisTheme(btn) {
   var frame = document.querySelector('.metis-home__frame');
   if (frame && frame.contentWindow) {
     frame.contentWindow.postMessage({ type: 'metis-theme', light: light }, '*');
+  }
+}
+
+/** Landing iframe onload: send it the theme the app is already in */
+function metisSyncTheme(frame) {
+  if (frame && frame.contentWindow) {
+    frame.contentWindow.postMessage({ type: 'metis-theme', light: document.body.classList.contains('metis-light') }, '*');
   }
 }
 
@@ -243,3 +260,18 @@ $(document).ready(function() {
   });
 });
 
+/** PNG download button on every server-rendered plot (renderPlot images) */
+document.addEventListener('mouseover', function (e) {
+  var host = e.target.closest && e.target.closest('.shiny-plot-output');
+  if (!host || host.querySelector('.mai-plot-dl')) return;
+  var b = document.createElement('button');
+  b.type = 'button'; b.className = 'mai-plot-dl'; b.textContent = 'PNG'; b.title = 'Download this plot';
+  b.addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    var img = host.querySelector('img');
+    if (!img) return;
+    var a = document.createElement('a');
+    a.href = img.src; a.download = (host.id || 'plot') + '.png'; a.click();
+  });
+  host.appendChild(b);
+});

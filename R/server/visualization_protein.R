@@ -16,7 +16,8 @@ server_protein_viz <- function(input, output, session,
                                 clinical_data = NULL, 
                                 peptide_data = NULL,
                                 biomarkers = NULL,
-                                target = NULL) {
+                                target = NULL,
+                                example_annotation = NULL) {
   
   # Target puede ser reactive o string
   target_var <- reactive({
@@ -37,15 +38,16 @@ server_protein_viz <- function(input, output, session,
   # Anotación de péptidos: el array se declara en un fichero, no se adivina
   # ============================================================================
 
+  # An uploaded file wins; otherwise the annotation of a loaded example
   annotation <- reactive({
-    req(input$protein_annotation)
+    path <- if (!is.null(input$protein_annotation)) input$protein_annotation$datapath
+            else if (!is.null(example_annotation)) example_annotation()
+    req(path)
 
-    tryCatch(read_peptide_annotation(input$protein_annotation$datapath),
-             error = function(e) {
-               showNotification(paste("❌ Annotation file:", e$message),
-                                type = "error", duration = 10)
-               NULL
-             })
+    run_step("PROTEIN", "reading the peptide annotation", read_peptide_annotation(path),
+             file = if (!is.null(input$protein_annotation)) input$protein_annotation$name else basename(path),
+             hint = "Columns needed: protein, accession, number, start, and end or peptide.",
+             done = function(a) list(peptides = nrow(a), proteins = unique(a$protein)))
   })
 
   output$protein_selector <- renderUI({
@@ -95,7 +97,12 @@ server_protein_viz <- function(input, output, session,
     }
     
     counts <- count_peptides(peptide_data(), protein_tag())
+    log_step("PROTEIN", "Protein requested", protein = protein_tag(), accession = protein_accession(),
+             peptide_columns = counts$total,
+             biomarkers_received = if (!is.null(biomarkers)) length(biomarkers()))
     if (counts$total == 0) {
+      log_step("PROTEIN", "Load refused", level = "WARN", why = paste("no peptide column is named after", protein_tag()),
+               hint = "The protein name in the annotation must match the one in the spot names, e.g. p 19 (Arah2)")
       showNotification(
         paste("⚠️ No peptide columns named after", protein_tag()),
         type = "warning",
@@ -277,7 +284,7 @@ server_protein_viz <- function(input, output, session,
                 # Extraer protein_id: "IgE_p15_ovoalb_1" → "ovoalb"
                 protein_id = stringr::str_match(raw, "_p[ _.-]?\\d+_([^_]+)")[,2],
                 # Extraer antibody type: "IgE_p15_..." → "IgE"
-                antibody_type = stringr::str_extract(raw, "^(IgE|IgG4)")
+                antibody_type = stringr::str_extract(raw, "^[A-Za-z][A-Za-z0-9]*(?=_)")
               )
             
             message("[BIOMARKER_MATCH] Parsed biomarkers:")
@@ -295,6 +302,7 @@ server_protein_viz <- function(input, output, session,
               dplyr::filter(grepl(comparable_name(protein), comparable_name(protein_id), fixed = TRUE))
             
             message("[BIOMARKER_MATCH] After protein filter: ", nrow(filtered_result), " biomarkers matched")
+            log_step("PROTEIN", "Biomarkers placed on the protein", protein = protein, received = length(peptide_biomarkers), on_this_protein = nrow(filtered_result), isotypes = unique(filtered_result$antibody_type))
             
             if (nrow(filtered_result) > 0) {
               # MANTENER antibody_type para separación IgE/IgG4
@@ -307,8 +315,7 @@ server_protein_viz <- function(input, output, session,
               
               message("[BIOMARKER_MATCH] Final biomarkers: ", nrow(result))
               message("[BIOMARKER_MATCH] Matched peptide numbers: ", paste(result$Number, collapse = ", "))
-              message("[BIOMARKER_MATCH] IgE biomarkers: ", sum(result$antibody_type == "IgE"))
-              message("[BIOMARKER_MATCH] IgG4 biomarkers: ", sum(result$antibody_type == "IgG4"))
+              message("[BIOMARKER_MATCH] By isotype: ", paste(names(table(result$antibody_type)), table(result$antibody_type), sep = "=", collapse = ", "))
               result
             } else {
               message("[BIOMARKER_MATCH] ⚠️ WARNING: No biomarkers matched the protein!")
@@ -546,7 +553,10 @@ server_protein_viz <- function(input, output, session,
   # Which structure to draw, decided server-side once per protein
   protein_structure <- reactive({
     req(protein_accession(), protein_info_data())
-    resolve_structure(protein_accession(), nrow(protein_info_data()$uniprot_info))
+    s <- resolve_structure(protein_accession(), nrow(protein_info_data()$uniprot_info))
+    log_step("PROTEIN", "Structure chosen", accession = protein_accession(), source = s$source,
+             pdb = s$pdb_id, reason = s$reason, detail = s$detail)
+    s
   })
 
   # The heading names what is actually on screen; it used to always say
@@ -578,10 +588,15 @@ server_protein_viz <- function(input, output, session,
     )
   })
 
+  # Open on the isotype that holds most of the ML biomarkers, so they are on
+  # screen without hunting for them (alphabetical order may put IgA first).
   output$protein_isotype_ui <- renderUI({
     isotypes <- protein_isotypes()
+    bm_iso <- sub("_.*", "", if (is.null(biomarkers)) character(0) else biomarkers())
+    bm_iso <- bm_iso[bm_iso %in% isotypes]
+    selected <- if (length(bm_iso)) names(which.max(table(bm_iso))) else isotypes[1]
     radioButtons("protein_isotype", "Isotype", choices = isotypes,
-                 selected = isotypes[1], inline = TRUE)
+                 selected = selected, inline = TRUE)
   })
 
   output$protein_color_mode_ui <- renderUI({
@@ -624,6 +639,16 @@ server_protein_viz <- function(input, output, session,
   observeEvent(input$protein_fdr, push_view(), ignoreInit = TRUE)
   observeEvent(input$protein_show_surface, push_view(), ignoreInit = TRUE)
   observeEvent(input$protein_biomarkers, push_view(), ignoreInit = TRUE)
+
+  # Every residue's signal per isotype and group, as drawn in 2D and 3D
+  output$protein_residues_csv <- downloadHandler(
+    filename = function() paste0("residue_signal_", protein_tag(), ".csv"),
+    content = function(file) {
+      d <- protein_dataset()
+      log_step("DOWNLOAD", "Residue signal table", protein = protein_tag(), rows = nrow(d))
+      readr::write_csv(d, file)
+    }
+  )
 
   output$protein_export <- downloadHandler(
     filename = function() paste0("biomarkers_", isolate(input$protein_isotype) %||% protein_isotypes()[1], ".fasta"),

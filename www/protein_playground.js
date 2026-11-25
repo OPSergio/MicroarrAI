@@ -175,6 +175,10 @@
     // below MIN_STEP: past that point the container scrolls instead. Fitting
     // everything into the box made long proteins unreadable.
     const n = PV.posList.length;
+    if (!n) {   // nothing loaded yet: no sizes to compute (they came out NaN)
+      d3.select("#pv-2d").html('<div class="pv-empty" style="padding:24px;color:#8a93a6;font-size:13px">Choose a protein and click Load and Visualize to draw its sequence map.</div>');
+      return;
+    }
     const altura = Math.min(60, Math.max(8, Math.round(Math.sqrt(n / 2))));
     const coords = posiciones(n, altura, 1);
     const xy = {}; PV.posList.forEach((p, i) => xy[p] = coords[i]);

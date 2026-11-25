@@ -110,15 +110,16 @@ can_use_rfe <- function(model_type, x, rfe_sizes = c(5, 10, 15, 20, 25)) {
     }
   }
   
-  # Check 3: Enough features for RFE sizes?
+  # Check 3: Enough features for RFE sizes? adjust_rfe_sizes() trims the
+  # sizes to what is available, so only the smallest size has to fit.
   n_features <- ncol(x)
-  max_size <- max(rfe_sizes)
-  
-  if (max_size > n_features) {
+  min_size <- min(rfe_sizes)
+
+  if (n_features <= min_size) {
     return(list(
       ok = FALSE,
-      reason = sprintf("Not enough features for RFE. Max size=%d but only %d features available", 
-                      max_size, n_features),
+      reason = sprintf("Not enough features for RFE. Smallest subset=%d but only %d features available",
+                      min_size, n_features),
       funcs = NULL
     ))
   }

@@ -1,59 +1,99 @@
 # MicroarrAI
 
-**Advanced Peptide Microarray Analysis Platform**
+**End-to-end analysis platform for peptide microarrays**
 
 [![R](https://img.shields.io/badge/R-4.4+-blue.svg)](https://www.r-project.org/)
 [![Shiny](https://img.shields.io/badge/Shiny-1.7+-green.svg)](https://shiny.rstudio.com/)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
-MicroarrAI is a comprehensive Shiny-based computing platform for peptide microarray data analysis, featuring advanced machine learning algorithms, statistical analysis, and interactive visualizations.
+MicroarrAI is an open-source R/Shiny web application for peptide microarray data. It takes raw scanner files through quality control, normalization, statistical testing, machine-learning biomarker selection and mapping of the signal onto each protein's sequence and 3D structure. No programming is required.
 
 ---
 
-## Platform Modules & Methodology
+## Workflow
 
-### Preprocessing and Quality Control
-The preprocessing module performs quality control filtering by removing spots with negative scanner quality flags, followed by local or global background subtraction. Inter-array technical variability is addressed using systematic normalization methods documented for the platform, including quantile normalization and variance-stabilizing normalization [8]. Intensities are transformed to logarithmic scale, and replicated spots are aggregated to feature-level summaries, typically by median. The resulting normalized matrix is exposed by the preprocessing module and represents the principal dependency for all inferential and machine-learning stages. Quality diagnostics include MA and density representations of pre- and post-normalization distributions, and cleaned outputs are produced in exportable tabular formats.
+The app is organised in tabs that follow the analysis order:
 
-### Peptide Summarization
-A peptide summarization module transforms platform-centric coordinates into biology-centric entities. Expression matrices are merged with GAL or custom annotation tables to map spots to peptide sequences and parent protein identifiers. Technical replicates with identical peptide sequences are collapsed using configurable aggregation operators (mean, median, or maximum). Sequence strings are standardized, including optional removal of linker fragments such as `GSGSG` when present. The module generates peptide-level data structures and positional annotation-ready structures that are used by downstream sequence mapping and protein visualization routines.
+1. **Preprocessing**: read the arrays, configure the controls and channels, normalize, impute and attach the clinical metadata
+2. **Quality control**: score each array
+3. **Peptide analysis**: run differential analysis and select candidate peptides
+4. **Machine learning**: run supervised and unsupervised models and build a consensus biomarker list
+5. **Protein visualization**: map the signal onto each protein in 2D and 3D
 
-### Statistical Analysis
-**Categorical Analysis:** Conducted on normalized peptide data using user-defined contrasts derived from categorical metadata. Peptide-wise hypothesis testing is executed primarily through Linear Models (LMs), providing a robust estimation of differential expression and coefficients for complex designs. Effect sizes are represented as $\log_2$ fold changes, and multiplicity control is applied using Benjamini-Hochberg false discovery rate adjustment. In future updates, the PERSEO statistical framework will be natively implemented to expand the suite of available statistical tests and imputation methods.
+Built-in example data can be loaded from the Preprocessing tab.
 
-**Continuous Association Analysis:** Implemented in a dedicated regression module using normalized peptide intensities and continuous metadata covariates aligned by sample intersection. Missingness is handled by pairwise deletion or imputation according to workflow configuration. Peptide-wise ordinary least squares models are fitted iteratively, with optional multivariate configurations when covariates are defined. The general formulation is:
+### 1. Data input and preprocessing
 
-$$ Y_{ij} = \beta_{0j} + \beta_{1j}X_i + \varepsilon_{ij} $$
+- **Input modes:** raw scanner files, or an already processed expression matrix (samples in rows or in columns; .csv/.txt/.tsv/.xlsx).
+- **Scanner files:** GenePix ATF `.gpr` and tabular exports (`.csv`, `.txt`, `.tsv`). The reader detects the header, separator, encoding and the foreground/background column pair of every channel. The array-reader tests cover GenePix, Mapix/InnoScan and ScanArray files. Any number of channels is supported (e.g. IgE and IgG4), and channels with no signal (scanned at gain 0) are reported and dropped.
+- **Spot filtering:** GenePix flags drop *bad* (−100) and *absent* (−75) spots. *Not found* (−50) spots are kept, because they are non-reactive peptides and blank controls. ScanArray-style flags use a threshold.
+- **Spot value:** `log2(foreground / background)` (default) or `foreground − background`, computed from the median intensities.
+- **Within-array normalization:** a robust z-score against the negative-control spots, `(x − median_neg) / MAD_neg`, computed per array and channel. Positive and negative controls are then removed and technical replicates are averaged.
+- **Between-array normalization (optional):** per-sample median/MAD scaling, or quantile normalization (Bolstad et al., 2003).
+- **Missing values:** they come from flagged spots, so they are imputed rather than set to zero. Options are k-nearest neighbours (default), Random Forest (missForest-style) or the per-peptide median.
+- **Output:** the processed expression matrix can be previewed and downloaded.
 
-where $Y_{ij}$ denotes normalized expression for peptide $j$ in sample $i$, and $X_i$ denotes the selected clinical continuous variable. Reported outputs include beta estimates, confidence intervals, $R^2$, F-statistics, and multiplicity-adjusted *p*-values.
+### 2. Quality control
 
-### Machine Learning
-**Supervised Learning:** The supervised machine-learning module receives normalized matrices and categorical targets from metadata. Data are partitioned into training and internal testing subsets (e.g., 70% and 30%), optional centering and scaling are applied within folds to reduce leakage, and model fitting is performed through cross-validated grid search. Documented algorithms include Random Forest, SVM with radial kernel, and PLS-DA [17-19]. Hold-out predictions are used to derive confusion matrices and classification metrics. For binary classification outputs, reported metrics follow standard definitions:
+Each array gets a scorecard with six metrics, each graded green/amber/red against thresholds that are documented in the app:
 
-$$ \mathrm{Sensitivity}=\frac{TP}{TP+FN}, \quad \mathrm{Specificity}=\frac{TN}{TN+FP}, \quad \mathrm{PPV}=\frac{TP}{TP+FP} $$
+- replicate agreement
+- positive-control dilution slope
+- signal-to-noise ratio of the top-dose positive control (green ≥ 10 SD, red < 3 SD: the classical quantification and detection limits)
+- background stability
+- % missing spots
+- % saturated spots
 
-The ROC-area endpoint is summarized as:
+The tab also shows per-array signal distributions and Q-Q plots.
 
-$$ \mathrm{AUC}=\int_{0}^{1} TPR(FPR)\,d(FPR) $$
+### 3. Differential analysis and candidate selection
 
-The auxiliary `ml_rfe_helpers.R` module implements recursive feature elimination (RFE) as a backward-selection wrapper that repeatedly ranks and prunes low-importance peptides under $k$-fold cross-validation. Subset selection is guided by cross-validated performance profiles (accuracy, kappa, and AUC), and the selected subset size corresponds to the maximal score under the specified resampling design.
+- Near-zero-variance peptides are removed.
+- A linear model `Expression ~ Group` is fitted per peptide. With two groups it reports the mean difference and its p-value. With three or more it reports the global F-test plus pairwise contrasts taken from the same model.
+- Alternative tests: t-test, ANOVA, Wilcoxon and Kruskal–Wallis.
+- Multiple testing: Benjamini–Hochberg FDR.
+- Plots: volcano plots and annotated heatmaps (ComplexHeatmap).
+- Per-peptide discrimination: logistic (binomial or multinomial) regression with ROC curves and AUC (pROC).
+- The peptides passed to machine learning are either the top N by p-value and AUC, or those above an AUC threshold.
 
-**Unsupervised Learning:** Performs exploratory structure analysis without using labels for model fitting. Matrices are reformatted to sample-by-feature orientation when needed and standardized by feature-wise Z-scores:
+### 4. Machine learning
 
-$$ Z_{ij}=\frac{X_{ij}-\mu_j}{\sigma_j} $$
+**Supervised** (caret):
 
-before dimensionality reduction with PCA, t-SNE, or UMAP [11]. Optional clustering is performed using $k$-means or agglomerative hierarchical procedures in reduced or full spaces. Clinical metadata are projected post hoc for color mapping only. The module produces coordinate matrices, scree outputs for PCA, two- and three-dimensional embeddings, and dendrogram-ready structures. Because t-SNE and UMAP are stochastic, reproducibility depends on fixed random seeds as indicated in module documentation.
+- Classifiers: C5.0, Random Forest, SVM and XGBoost.
+- Evaluation: repeated k-fold cross-validation, with optional hyperparameter tuning and recursive feature elimination (RFE).
+- Metrics, computed on out-of-fold predictions: accuracy, kappa, sensitivity, specificity and AUC.
+- Variable importance per model, plus SHAP values for XGBoost (shapviz).
+- **Consensus biomarkers:** peptides that rank in the top N of at least two models.
+- PLS-DA score plot (mixOmics) as a supervised projection.
+- A warning is shown when the sample size is small or much smaller than the number of peptides.
 
-### Protein Mapping and Visualization
-**Linear Protein Mapping:** Protein-focused visualization maps aggregated peptide signals to full-length target protein sequences. Short peptides (e.g., 15-mers) are aligned to primary sequences to recover start and end indices, and reactivity trajectories are summarized along residue positions using moving averages and optional LOESS smoothing. Statistical outputs from categorical testing can be used to highlight significant regions in the linear profile. This layer generates positional epitope data frames and linear N-terminus-to-C-terminus snake plots. When HTML integration is enabled, mapped signals can be superimposed on three-dimensional structures through NGL-based logic.
+**Unsupervised:**
 
-**Interactive 3D Visualization:** The dedicated three-dimensional visualization module consumes coordinate outputs from unsupervised analyses and merges them with metadata for interactive rendering. Axis mappings, hover labels, and color encodings are user-configurable. Plot generation is implemented with Plotly WebGL traces and supports zoom, pan, rotation, and widget-level export. According to the module specification, rendering performance declines substantially beyond approximately 10,000 points in a single interactive scene.
+- PCA, PCoA and NMDS, with Euclidean, Manhattan, Canberra or Bray–Curtis distance.
+- DBSCAN and hierarchical clustering heatmaps.
+- Clinical variables are used only to colour the plots. The projections can be explored in 2D and in interactive 3D, drawn natively in the browser.
+
+### 5. Protein mapping (2D and 3D)
+
+- The sequence, post-translational modifications and signal peptide are retrieved from **UniProt** using the protein's accession.
+- Each array peptide is placed on the sequence, either from the array annotation or from the tiling design (peptide length and offset).
+- The residue-level signal is the mean of all peptides covering that residue, computed per clinical group and isotype.
+- **2D:** an interactive snake plot that highlights the selected biomarker peptides.
+- **3D:** the **AlphaFold** model of the protein, with its pLDDT confidence and coverage reported. When no model exists, the app uses the best-covering experimental **PDB** structure (via the PDBe/SIFTS mappings). The signal is coloured onto the structure with **3Dmol.js**.
+- This tab needs internet access to UniProt, AlphaFold DB and PDBe.
+
+### Report, downloads and logs
+- **Report (PDF):** the *Report* button (top right, any tab) builds a PDF with every parameter entered, the input data, the quality-control scorecard, the differential analysis, the model validation with confidence intervals, the consensus biomarkers and their positions on the proteins, plus software versions and a methods summary. Steps not yet run are marked as such.
+- **All results (Excel):** the same content as one workbook, one sheet per table (scorecard, differential results, validation, consensus, train/test partition, variable importance per model, …).
+- Every interactive chart downloads as PNG or SVG, every server-rendered plot as PNG; the processed matrix, volcano table, QC scorecard, biomarker FASTA and residue-level signal have their own downloads.
+- **Step log:** each step writes `date level [session] STEP | what was asked or done | details` to the server log (shown live in the admin panel). Refusals and failures say why and what to do (`why=…, hint=…`). Only counts and setting names are logged, never patient values.
 
 ---
 
 ## Installation & Deployment
 
-MicroarrAI supports both **Docker** and **Singularity/Apptainer** deployments to ensure reproducibility across workstations and HPC environments.
+MicroarrAI ships as **Docker** and **Singularity/Apptainer** images. Both are built on `rocker/shiny-verse:4.4.0` from one dependency list (`dependencies.R`), so workstation and HPC deployments run the same software.
 
 ### Quick Start
 
@@ -64,4 +104,4 @@ chmod +x deploy.sh docker/docker-deploy.sh singularity/singularity-deploy.sh
 ./deploy.sh
 ```
 
-Please refer to [INSTALLATION.md](INSTALLATION.md) for detailed configuration, persistent data management, and troubleshooting.
+See [INSTALLATION.md](INSTALLATION.md) for detailed configuration, persistent data management and troubleshooting.

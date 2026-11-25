@@ -86,11 +86,9 @@ ui_preprocess <- function() {
         
         tags$div(
           style = "padding: 10px;",
-          actionButton("load_example_db", 
-                     label = tagList(icon("users"), " Load Clinical Data"),
-                     style = "width: 100%; margin-bottom: 8px; background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); color: white; border: none; padding: 8px;"),
-          actionButton("load_example_pep", 
-                     label = tagList(icon("dna"), " Load Peptide Data"),
+          selectInput("example_dataset", NULL, choices = EXAMPLE_DATASETS, width = "100%"),
+          actionButton("load_example",
+                     label = tagList(icon("flask"), " Load example"),
                      style = "width: 100%; background: linear-gradient(135deg, #17a589 0%, #0e7d6e 100%); color: white; border: none; padding: 8px;")
         )
       )
@@ -139,7 +137,7 @@ ui_preprocess <- function() {
               radioButtons(
                 "input_mode",
                 label = dark_label("Select Input Mode:"),
-                choices = c("RAW microarray files (GenePix)" = "raw",
+                choices = c("Raw scanner files (.gpr, .csv, .txt)" = "raw",
                            "Processed expression matrix" = "processed"),
                 selected = "raw"
               )
@@ -189,7 +187,7 @@ ui_preprocess <- function() {
                   fileInput(
                     "raw_files",
                     buttonLabel = "Browse...",
-                    label = dark_label("Upload GenePix scan files:"),
+                    label = dark_label("Upload your scanner files (one per array):"),
                     multiple = TRUE,
                     accept = c(".gpr", ".csv", ".txt", ".tsv"),
                     placeholder = "No files selected"
@@ -204,7 +202,7 @@ ui_preprocess <- function() {
                   tags$h6(icon("lightbulb"), " Tips:", style = "color: #191c32; margin-bottom: 10px;"),
                   tags$ul(
                     style = "color: #191c32; font-size: 14px;",
-                    tags$li("Select all your GenePix scan files at once"),
+                    tags$li("Select all your scan files at once (Ctrl/Cmd + A in the dialog)"),
                     tags$li("Each file = one two-channel microarray"),
                     tags$li("File names will become sample IDs"),
                     tags$li("Files stay in your session and are deleted when you leave")
@@ -593,6 +591,9 @@ ui_preprocess <- function() {
               verbatimTextOutput("data_status_db")
             )
           ),
+
+          # Which clinical columns enter the analysis (filled after the upload)
+          uiOutput("clinical_columns_ui"),
           
           # Advanced upload modal placeholder
           conditionalPanel(

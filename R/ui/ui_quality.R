@@ -90,14 +90,7 @@ ui_quality <- function() {
           column(3, uiOutput("qc_channel_selector")),
           column(3, checkboxInput("qc_only_problems", "Only arrays with a problem", FALSE))
         ),
-        ggiraph::girafeOutput("qc_heatmap", height = "340px"),
-        tags$div(
-          class = "qc-legend",
-          tags$span(tags$span(class = "qc-dot", style = "background:#17a589;"), "Pass"),
-          tags$span(tags$span(class = "qc-dot", style = "background:#e8a33d;"), "Borderline"),
-          tags$span(tags$span(class = "qc-dot", style = "background:#d1495b;"), "Fail"),
-          tags$span(tags$span(class = "qc-dot", style = "background:#dfe4e6;"), "Not measurable")
-        )
+        chartOutput("qc_heatmap", height = "380px")
       ),
 
       # ---- Cohort-level distribution ------------------------------------

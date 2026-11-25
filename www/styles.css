@@ -706,3 +706,48 @@ body.metis-light .ml-sidebar::-webkit-scrollbar-track { background: rgba(31, 42,
 .mi-panel-title + .girafe_container_std { margin-top: 0; }
 
 body.metis-light .mi-panel-title { color: #6b7280; }
+
+/* Clinical column picker (Preprocessing, step 5) */
+.clinical-cols { margin-top: 18px; padding: 16px 18px; border-radius: 10px; background: #f6f8fb; border: 1px solid #e3e7ee; }
+.clinical-cols-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; color: #191c32; }
+.clinical-cols-head b { font-size: 14px; }
+.clinical-cols-count { color: #6b7280; font-size: 12.5px; margin-right: auto; }
+.clinical-cols-head a { font-size: 12.5px; font-weight: 600; color: #17a589; }
+.clinical-cols .shiny-options-group { display: flex; flex-wrap: wrap; gap: 8px; max-height: 260px; overflow-y: auto; }
+.clinical-cols .checkbox-inline, .clinical-cols .form-check-inline { margin: 0 !important; padding: 7px 12px 7px 32px; border-radius: 9px; background: #fff; border: 1px solid #dfe4ec; color: #191c32; }
+.clinical-cols .checkbox-inline:has(input:checked), .clinical-cols .form-check-inline:has(input:checked) { border-color: #17a589; box-shadow: inset 3px 0 0 #17a589; }
+.clinical-cols .checkbox-inline span b, .clinical-cols .form-check-inline span b { font-weight: 650; }
+.clinical-cols .checkbox-inline small, .clinical-cols .form-check-inline small { display: block; color: #8a93a6; font-size: 11px; }
+.channel-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: 0; box-shadow: 0 0 0 2px rgba(0,0,0,.06); }
+
+/* Tutorial button in the top navbar */
+.metis-tutorial { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; margin-right: 10px; position: relative; z-index: 1; padding: 7px 14px; border-radius: 999px; white-space: nowrap;
+  font: 600 13px/1 'Space Grotesk', 'Inter', system-ui, sans-serif; color: #0b1020 !important; text-decoration: none !important;
+  background: linear-gradient(135deg, #2ec4a6, #d2ad62); box-shadow: 0 6px 18px -8px rgba(46,196,166,.8); transition: transform .15s, filter .15s; }
+.metis-tutorial:hover { transform: translateY(-1px); filter: brightness(1.07); }
+.metis-tutorial + .metis-toggle { margin-left: 0; }
+@media (max-width: 1240px) { .metis-tutorial span { display: none; } .metis-tutorial { padding: 8px 10px; } }
+
+/* Report button (fixed, left of the reset button) and its dialog */
+.metis-report { position: fixed; top: 16px; right: 64px; z-index: 2000; pointer-events: auto; height: 38px; display: inline-flex; align-items: center; gap: 7px;
+  padding: 0 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); background: rgba(20,23,46,.85); color: #eef1f8;
+  font: 600 13px/1 'Space Grotesk', 'Inter', system-ui, sans-serif; cursor: pointer; backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+.metis-report:hover { background: #17a589; border-color: #17a589; }
+body.metis-light .metis-report { background: #fff; color: #1f2a44; border-color: rgba(31,42,68,.18); }
+@media (max-width: 1400px) { .metis-report span { display: none; } .metis-report { padding: 0; width: 38px; justify-content: center; } }
+.report-status { list-style: none; padding: 0; margin: 14px 0 18px; display: grid; gap: 6px; }
+.report-status li { padding-left: 26px; position: relative; color: #191c32; }
+.report-status li::before { position: absolute; left: 0; top: 0; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800; }
+.report-status li.ok::before { content: "\2713"; background: #17a589; color: #fff; }
+.report-status li.todo { color: #8a93a6; }
+.report-status li.todo::before { content: "\2013"; background: #e3e7ee; color: #8a93a6; }
+.report-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.btn-report { background: linear-gradient(135deg, #17a589, #0e7d6e) !important; color: #fff !important; border: 0 !important; padding: 10px 18px !important; font-weight: 600 !important; border-radius: 10px !important; }
+.btn-report.alt { background: #191c32 !important; }
+
+/* PNG download on every server-rendered plot (charts have their own) */
+.shiny-plot-output { position: relative; }
+.mai-plot-dl { position: absolute; top: 6px; right: 6px; z-index: 5; opacity: 0; transition: opacity .2s; border: 1px solid #dde1e8; background: #fff; color: #4b5563;
+  font: 600 10.5px/1 'Space Grotesk', system-ui, sans-serif; letter-spacing: .06em; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+.shiny-plot-output:hover .mai-plot-dl { opacity: 1; }
+.mai-plot-dl:hover { border-color: #17a589; color: #17a589; }

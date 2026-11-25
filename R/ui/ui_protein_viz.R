@@ -88,7 +88,8 @@ ui_protein_viz <- function() {
           sliderInput("protein_fdr", "Biomarker FDR ≤", min = 0.001, max = 0.10, value = 0.05, step = 0.001),
           checkboxInput("protein_show_surface", "Molecular surface", FALSE),
           checkboxInput("protein_biomarkers", "Highlight biomarkers", TRUE),
-          downloadButton("protein_export", "Export biomarkers (FASTA)", style = "width:100%;margin-top:6px;")
+          downloadButton("protein_export", "Export biomarkers (FASTA)", style = "width:100%;margin-top:6px;"),
+          downloadButton("protein_residues_csv", "Export residue signal (CSV)", style = "width:100%;margin-top:6px;")
         )
       ),
 

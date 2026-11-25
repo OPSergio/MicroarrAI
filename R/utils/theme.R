@@ -12,7 +12,7 @@
 #' Based on theme_minimal with custom typography and colors
 #'
 #' @param base_size Base font size in points (default: 12)
-#' @param base_family Font family (default: Arial or from options)
+#' @param base_family Font family (default: "sans", which every graphics device resolves)
 #' @param grid Show grid lines (default: TRUE)
 #' @param axis Show axis titles and text (default: TRUE)
 #' @param ticks Show axis ticks (default: TRUE)
@@ -21,7 +21,7 @@
 #' ggplot(data) + geom_point() + theme_microarrai()
 #' ggplot(data) + geom_bar() + theme_microarrai(grid = FALSE)
 theme_microarrai <- function(base_size = 12,
-                             base_family = getOption("microarrai_font", "Arial"),
+                             base_family = getOption("microarrai_font", "sans"),
                              grid = TRUE, 
                              axis = TRUE, 
                              ticks = TRUE) {
@@ -139,5 +139,5 @@ set_geom_defaults_microarrai <- function() {
 activate_microarrai_plot_style <- function() {
   ggplot2::theme_set(theme_microarrai())
   set_geom_defaults_microarrai()
-  options(microarrai_font = "Arial")  # Can be changed to "DejaVu Sans" if preferred
+  options(microarrai_font = "sans")  # Can be changed to "DejaVu Sans" if preferred
 }

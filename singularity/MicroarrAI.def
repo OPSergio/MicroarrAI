@@ -88,9 +88,7 @@ From: rocker/shiny-verse:4.4.0
     export TZ=UTC
     # Upload ceiling for a whole scan set; see R/global.R
     export MICROARRAI_MAX_UPLOAD_MB=1024
-    # No X display in the container: rgl must use its null device
-    export RGL_USE_NULL=TRUE
-    # Font cache for ggiraph/systemfonts: there is no $HOME in the container
+    # R user cache (bslib/sass): there is no $HOME in the container
     export XDG_CACHE_HOME=/tmp/.cache
     # Telemetry + admin accounts (bind-mounted from ./state by the deploy script)
     export MICROARRAI_STATE_DIR=/var/lib/microarrai

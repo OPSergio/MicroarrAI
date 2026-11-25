@@ -1,0 +1,163 @@
+protein,accession,name,number,start,end,peptide,length
+Betv1,P15494,Bet v 1 (birch pollen PR-10),1,1,15,MGVFNYETETTSVIP,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),2,6,20,YETETTSVIPAARLF,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),3,11,25,TSVIPAARLFKAFIL,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),4,16,30,AARLFKAFILDGDNL,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),5,21,35,KAFILDGDNLFPKVA,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),6,26,40,DGDNLFPKVAPQAIS,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),7,31,45,FPKVAPQAISSVENI,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),8,36,50,PQAISSVENIEGNGG,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),9,41,55,SVENIEGNGGPGTIK,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),10,46,60,EGNGGPGTIKKISFP,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),11,51,65,PGTIKKISFPEGFPF,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),12,56,70,KISFPEGFPFKYVKD,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),13,61,75,EGFPFKYVKDRVDEV,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),14,66,80,KYVKDRVDEVDHTNF,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),15,71,85,RVDEVDHTNFKYNYS,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),16,76,90,DHTNFKYNYSVIEGG,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),17,81,95,KYNYSVIEGGPIGDT,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),18,86,100,VIEGGPIGDTLEKIS,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),19,91,105,PIGDTLEKISNEIKI,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),20,96,110,LEKISNEIKIVATPD,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),21,101,115,NEIKIVATPDGGSIL,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),22,106,120,VATPDGGSILKISNK,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),23,111,125,GGSILKISNKYHTKG,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),24,116,130,KISNKYHTKGDHEVK,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),25,121,135,YHTKGDHEVKAEQVK,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),26,126,140,DHEVKAEQVKASKEM,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),27,131,145,AEQVKASKEMGETLL,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),28,136,150,ASKEMGETLLRAVES,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),29,141,155,GETLLRAVESYLLAH,15
+Betv1,P15494,Bet v 1 (birch pollen PR-10),30,146,160,RAVESYLLAHSDAYN,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),1,1,15,MKIVLAIASLLALSA,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),2,6,20,AIASLLALSAVYARP,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),3,11,25,LALSAVYARPSSIKT,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),4,16,30,VYARPSSIKTFEEYK,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),5,21,35,SSIKTFEEYKKAFNK,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),6,26,40,FEEYKKAFNKSYATF,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),7,31,45,KAFNKSYATFEDEEA,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),8,36,50,SYATFEDEEAARKNF,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),9,41,55,EDEEAARKNFLESVK,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),10,46,60,ARKNFLESVKYVQSN,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),11,51,65,LESVKYVQSNGGAIN,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),12,56,70,YVQSNGGAINHLSDL,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),13,61,75,GGAINHLSDLSLDEF,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),14,66,80,HLSDLSLDEFKNRFL,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),15,71,85,SLDEFKNRFLMSAEA,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),16,76,90,KNRFLMSAEAFEHLK,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),17,81,95,MSAEAFEHLKTQFDL,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),18,86,100,FEHLKTQFDLNAETN,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),19,91,105,TQFDLNAETNACSIN,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),20,96,110,NAETNACSINGNAPA,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),21,101,115,ACSINGNAPAEIDLR,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),22,106,120,GNAPAEIDLRQMRTV,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),23,111,125,EIDLRQMRTVTPIRM,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),24,116,130,QMRTVTPIRMQGGCG,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),25,121,135,TPIRMQGGCGSCWAF,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),26,126,140,QGGCGSCWAFSGVAA,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),27,131,145,SCWAFSGVAATESAY,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),28,136,150,SGVAATESAYLAYRN,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),29,141,155,TESAYLAYRNQSLDL,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),30,146,160,LAYRNQSLDLAEQEL,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),31,151,165,QSLDLAEQELVDCAS,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),32,156,170,AEQELVDCASQHGCH,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),33,161,175,VDCASQHGCHGDTIP,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),34,166,180,QHGCHGDTIPRGIEY,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),35,171,185,GDTIPRGIEYIQHNG,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),36,176,190,RGIEYIQHNGVVQES,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),37,181,195,IQHNGVVQESYYRYV,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),38,186,200,VVQESYYRYVAREQS,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),39,191,205,YYRYVAREQSCRRPN,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),40,196,210,AREQSCRRPNAQRFG,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),41,201,215,CRRPNAQRFGISNYC,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),42,206,220,AQRFGISNYCQIYPP,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),43,211,225,ISNYCQIYPPNVNKI,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),44,216,230,QIYPPNVNKIREALA,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),45,221,235,NVNKIREALAQTHSA,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),46,226,240,REALAQTHSAIAVII,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),47,231,245,QTHSAIAVIIGIKDL,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),48,236,250,IAVIIGIKDLDAFRH,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),49,241,255,GIKDLDAFRHYDGRT,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),50,246,260,DAFRHYDGRTIIQRD,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),51,251,265,YDGRTIIQRDNGYQP,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),52,256,270,IIQRDNGYQPNYHAV,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),53,261,275,NGYQPNYHAVNIVGY,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),54,266,280,NYHAVNIVGYSNAQG,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),55,271,285,NIVGYSNAQGVDYWI,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),56,276,290,SNAQGVDYWIVRNSW,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),57,281,295,VDYWIVRNSWDTNWG,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),58,286,300,VRNSWDTNWGDNGYG,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),59,291,305,DTNWGDNGYGYFAAN,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),60,296,310,DNGYGYFAANIDLMM,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),61,301,315,YFAANIDLMMIEEYP,15
+Derp1,P08176,Der p 1 (house dust mite cysteine protease),62,306,320,IDLMMIEEYPYVVIL,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),1,1,15,MMYKILCLSLLVAAV,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),2,6,20,LCLSLLVAAVARDQV,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),3,11,25,LVAAVARDQVDVKDC,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),4,16,30,ARDQVDVKDCANHEI,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),5,21,35,DVKDCANHEIKKVLV,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),6,26,40,ANHEIKKVLVPGCHG,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),7,31,45,KKVLVPGCHGSEPCI,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),8,36,50,PGCHGSEPCIIHRGK,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),9,41,55,SEPCIIHRGKPFQLE,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),10,46,60,IHRGKPFQLEAVFEA,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),11,51,65,PFQLEAVFEANQNTK,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),12,56,70,AVFEANQNTKTAKIE,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),13,61,75,NQNTKTAKIEIKASI,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),14,66,80,TAKIEIKASIDGLEV,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),15,71,85,IKASIDGLEVDVPGI,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),16,76,90,DGLEVDVPGIDPNAC,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),17,81,95,DVPGIDPNACHYMKC,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),18,86,100,DPNACHYMKCPLVKG,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),19,91,105,HYMKCPLVKGQQYDI,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),20,96,110,PLVKGQQYDIKYTWN,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),21,101,115,QQYDIKYTWNVPKIA,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),22,106,120,KYTWNVPKIAPKSEN,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),23,111,125,VPKIAPKSENVVVTV,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),24,116,130,PKSENVVVTVKVMGD,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),25,121,135,VVVTVKVMGDDGVLA,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),26,126,140,KVMGDDGVLACAIAT,15
+Derp2,P49278,Der p 2 (house dust mite NPC2 family),27,131,145,DGVLACAIATHAKIR,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),1,1,15,MKGACVLVLLWAALL,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),2,6,20,VLVLLWAALLLISGG,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),3,11,25,WAALLLISGGNCEIC,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),4,16,30,LISGGNCEICPAVKR,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),5,21,35,NCEICPAVKRDVDLF,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),6,26,40,PAVKRDVDLFLTGTP,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),7,31,45,DVDLFLTGTPDEYVE,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),8,36,50,LTGTPDEYVEQVAQY,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),9,41,55,DEYVEQVAQYKALPV,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),10,46,60,QVAQYKALPVVLENA,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),11,51,65,KALPVVLENARILKN,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),12,56,70,VLENARILKNCVDAK,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),13,61,75,RILKNCVDAKMTEED,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),14,66,80,CVDAKMTEEDKENAL,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),15,71,85,MTEEDKENALSVLDK,15
+Feld1,P30438,Fel d 1 chain 1 (cat uteroglobin),16,76,90,KENALSVLDKIYTSP,15
+Olee1,P19963,Ole e 1 (olive pollen),1,1,15,EDIPQPPVSQFHIQG,15
+Olee1,P19963,Ole e 1 (olive pollen),2,6,20,PPVSQFHIQGQVYCD,15
+Olee1,P19963,Ole e 1 (olive pollen),3,11,25,FHIQGQVYCDTCRAG,15
+Olee1,P19963,Ole e 1 (olive pollen),4,16,30,QVYCDTCRAGFITEL,15
+Olee1,P19963,Ole e 1 (olive pollen),5,21,35,TCRAGFITELSEFIP,15
+Olee1,P19963,Ole e 1 (olive pollen),6,26,40,FITELSEFIPGASLR,15
+Olee1,P19963,Ole e 1 (olive pollen),7,31,45,SEFIPGASLRLQCKD,15
+Olee1,P19963,Ole e 1 (olive pollen),8,36,50,GASLRLQCKDKENGD,15
+Olee1,P19963,Ole e 1 (olive pollen),9,41,55,LQCKDKENGDVTFTE,15
+Olee1,P19963,Ole e 1 (olive pollen),10,46,60,KENGDVTFTEVGYTR,15
+Olee1,P19963,Ole e 1 (olive pollen),11,51,65,VTFTEVGYTRAEGLY,15
+Olee1,P19963,Ole e 1 (olive pollen),12,56,70,VGYTRAEGLYSMLVE,15
+Olee1,P19963,Ole e 1 (olive pollen),13,61,75,AEGLYSMLVERDHKN,15
+Olee1,P19963,Ole e 1 (olive pollen),14,66,80,SMLVERDHKNEFCEI,15
+Olee1,P19963,Ole e 1 (olive pollen),15,71,85,RDHKNEFCEITLISS,15
+Olee1,P19963,Ole e 1 (olive pollen),16,76,90,EFCEITLISSGRKDC,15
+Olee1,P19963,Ole e 1 (olive pollen),17,81,95,TLISSGRKDCNEIPT,15
+Olee1,P19963,Ole e 1 (olive pollen),18,86,100,GRKDCNEIPTEGWAK,15
+Olee1,P19963,Ole e 1 (olive pollen),19,91,105,NEIPTEGWAKPSLKF,15
+Olee1,P19963,Ole e 1 (olive pollen),20,96,110,EGWAKPSLKFKLNTV,15
+Olee1,P19963,Ole e 1 (olive pollen),21,101,115,PSLKFKLNTVNGTTR,15
+Olee1,P19963,Ole e 1 (olive pollen),22,106,120,KLNTVNGTTRTVNPL,15
+Olee1,P19963,Ole e 1 (olive pollen),23,111,125,NGTTRTVNPLGFFKK,15
+Olee1,P19963,Ole e 1 (olive pollen),24,116,130,TVNPLGFFKKEALPK,15
+Olee1,P19963,Ole e 1 (olive pollen),25,121,135,GFFKKEALPKCAQVY,15
+Olee1,P19963,Ole e 1 (olive pollen),26,126,140,EALPKCAQVYNKLGM,15
+Olee1,P19963,Ole e 1 (olive pollen),27,131,145,CAQVYNKLGMYPPNM,15

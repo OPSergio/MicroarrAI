@@ -36,7 +36,7 @@ R/server/
 ├── ml_unsupervised.R     # PCA, PCoA, NMDS, distance matrices
 ├── ml_supervised.R       # C5.0, RF, SVM, XGBoost, feature selection
 ├── regression_models.R   # GLM, multinomial regression, ROC curves
-└── visualization_3d.R    # 3D scatter plots with rgl
+└── (3D scatter: R/utils/charts.R + www/charts/scatter3d.js)
 ```
 
 ### Key Features
@@ -708,77 +708,21 @@ ggplot(roc_data, aes(x = 1 - specificity, y = sensitivity, color = class)) +
 
 ## 3D Visualization
 
-**File**: `R/server/visualization_3d.R`
+**Files**: `R/utils/charts.R` (spec builders) and `www/charts/scatter3d.js` (drawing)
 
-### Function: `create_3d_scatter()`
-
-Creates interactive 3D scatter plots with rgl.
-
-**Parameters:**
-- `x, y, z`: Numeric vectors (coordinates)
-- `groups`: Factor (grouping variable)
-- `xlab, ylab, zlab`: Axis labels
-- `surface`: Logical, draw fitted surface (default: TRUE)
-- `ellipsoid`: Logical, draw confidence ellipsoids (default: FALSE)
-- `fit`: Surface type ("smooth", "linear", "quadratic", "additive")
-- `surface_col`: Color palette
-
-**Returns:**
-- rglwidget object (for Shiny renderRglwidget)
-
-**Surface Fit Types:**
-
-1. **"smooth"**: Local regression (loess) - best for non-linear patterns
-2. **"linear"**: Linear regression plane - simplest model
-3. **"quadratic"**: Quadratic surface - moderate complexity
-4. **"additive"**: Additive model (GAM) - flexible, avoids overfitting
-
-**Usage:**
+`chart_scatter3d(x, y, z, group, id, tip, labels)` returns a spec that
+`renderChart()` sends to the browser, where a canvas draws shaded points with
+depth sorting, a floor grid with drop lines, group centroids and optional
+spokes. Drag rotates, +/− zoom, double-click resets, legend chips hide groups.
+No server-side graphics device, WebGL widget or system font is involved.
 
 ```r
-# PCA 3D plot
-pca_result <- compute_pca(data)
-groups <- extract_target_groups(data, "Disease_Status")
-
-plot_3d <- create_3d_pca(
-  pca_coords = pca_result,
-  groups = groups,
-  variance = calculate_pca_variance(pca_result),
-  ellipsoid = TRUE,
-  surface = FALSE  # Disabled when ellipsoid = TRUE
-)
-
-# In Shiny server:
-output$pca_3d <- renderRglwidget({
-  plot_3d
+output$d3_PCA <- renderChart({
+  s <- as.data.frame(pca_fit()$x)
+  chart_scatter3d(s$PC1, s$PC2, s$PC3, groups, ids, sample_tip(ids, groups, PC1 = s$PC1),
+                  labels = c("PC1", "PC2", "PC3"))
 })
-```
-
-**Convenience Wrappers:**
-
-```r
-# PCA
-create_3d_pca(pca_coords, groups, variance, ...)
-
-# PCoA
-create_3d_pcoa(pcoa_coords, groups, ...)
-
-# NMDS
-create_3d_nmds(nmds_coords, groups, ...)
-```
-
-**Toggle Surface Fit (Reactive):**
-
-```r
-# In Shiny server
-surface_type <- reactiveVal("smooth")
-
-observeEvent(input$toggle_surface_btn, {
-  new_fit <- toggle_surface_fit(surface_type())
-  surface_type(new_fit)
-})
-
-# Cycle: smooth -> linear -> quadratic -> additive -> smooth
+# UI: chartOutput("d3_PCA", height = "500px")
 ```
 
 ---
@@ -969,7 +913,7 @@ ggplot(roc_data, aes(x = 1 - specificity, y = sensitivity)) +
    - Use ellipsoids to show group separation
    - Toggle surface fits to explore patterns
    - Variance labels for PCA axes
-   - Interactive rglwidget for exploration
+   - Interactive 3D view drawn in the browser (www/charts/scatter3d.js)
 
 ---
 

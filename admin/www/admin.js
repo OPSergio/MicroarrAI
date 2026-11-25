@@ -6,8 +6,8 @@
 
   // ---- live log viewer -------------------------------------------------------
   function level(line) {
-    if (/^(Warning: )?Error in |^Error[: ]/.test(line)) return 'err';
-    if (/^Warning|^\[telemetry\] write failed/.test(line)) return 'warn';
+    if (/^(Warning: )?Error in |^Error[: ]|^\S+ \S+ ERROR /.test(line)) return 'err';
+    if (/^Warning|^\[telemetry\] write failed|^\S+ \S+ WARN /.test(line)) return 'warn';
     return '';
   }
 
